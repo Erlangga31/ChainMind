@@ -1,0 +1,42 @@
+[
+  {
+    "scenario_id": "weather-delay",
+    "title": "Extreme weather delays cargo ship",
+    "description": "Severe weather has delayed the vessel carrying Microchip X by five days.",
+    "component_id": "microchip-x",
+    "component_name": "Microchip X",
+    "delay_days": 5,
+    "source": "port-weather-monitor",
+    "event_type": "weather"
+  },
+  {
+    "scenario_id": "border-closure",
+    "title": "Geopolitical border closure",
+    "description": "A border closure has delayed the overland route carrying Microchip X by six days.",
+    "component_id": "microchip-x",
+    "component_name": "Microchip X",
+    "delay_days": 6,
+    "source": "geopolitical-risk-feed",
+    "event_type": "geopolitical"
+  },
+  {
+    "scenario_id": "vendor-failure",
+    "title": "Supplier factory fire",
+    "description": "A factory fire has stopped shipments from the primary Microchip X supplier.",
+    "component_id": "microchip-x",
+    "component_name": "Microchip X",
+    "delay_days": 7,
+    "source": "supplier-risk-monitor",
+    "event_type": "vendor_failure"
+  },
+  {
+    "scenario_id": "port-congestion",
+    "title": "Port congestion",
+    "description": "Port congestion has delayed the Microchip X shipment by four days.",
+    "component_id": "microchip-x",
+    "component_name": "Microchip X",
+    "delay_days": 4,
+    "source": "port-operations-feed",
+    "event_type": "port_congestion"
+  }
+]

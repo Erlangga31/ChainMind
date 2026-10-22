@@ -33,3 +33,17 @@ The response from `POST /disruptions` contains the `run_id`; use it to read the 
 Only `approve` executes the purchase order. `revise` creates a replacement draft that remains pending approval; `reject` never executes. A decision on a non-pending run returns HTTP 409.
 
 Expected failures use a stable JSON envelope with `code`, `message`, and `details`; request validation errors return HTTP 422. Unexpected server errors return a generic message and are logged server-side.
+
+## Local SAP sandbox
+
+Run the separate simulator on port 8100 with:
+
+```powershell
+uv run uvicorn sap_sandbox.main:app --app-dir sandbox --host 127.0.0.1 --port 8100 --reload
+```
+
+Its interactive API reference is at `http://localhost:8100/docs`. The simulator exposes OData-style
+stock and purchase-order resources under `/sap/opu/odata/sap/`, Ariba sourcing under
+`/ariba/sourcing/`, Event Mesh publishing under `/event-mesh/publish`, and approval tasks under
+`/workflow/tasks`. Supported OData collection options are `$filter` equality, `$select`, and `$top`.
+The OAuth token endpoint issues ephemeral demo tokens; it is not an identity service.

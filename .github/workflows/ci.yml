@@ -32,9 +32,9 @@ jobs:
       - name: Install project and development dependencies
         run: uv sync --extra dev
       - name: Lint
-        run: uv run ruff check src tests scripts infra
+        run: uv run ruff check src tests scripts infra sandbox
       - name: Check formatting
-        run: uv run ruff format --check src tests scripts infra
+        run: uv run ruff format --check src tests scripts infra sandbox
       - name: Run tests
         run: uv run pytest -q
 
