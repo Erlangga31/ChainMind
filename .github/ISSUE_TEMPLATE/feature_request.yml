@@ -1,0 +1,33 @@
+name: Feature request
+description: Usulkan peningkatan ChainMind.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Masalah yang ingin diselesaikan
+      description: Jelaskan konteks dan siapa yang terdampak.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Solusi yang diusulkan
+      description: Jelaskan perilaku yang diinginkan.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Kriteria penerimaan
+      description: Bagaimana hasilnya dapat diuji?
+    validations:
+      required: false
+  - type: checkboxes
+    id: safeguards
+    attributes:
+      label: Batas keselamatan
+      options:
+        - label: Perubahan tetap mempertahankan persetujuan manusia sebelum transaksi finansial.
+          required: false

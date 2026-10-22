@@ -1,0 +1,10 @@
+{
+  "component_id": "microchip-x",
+  "component_name": "Microchip X",
+  "current_stock": 3000,
+  "daily_consumption": 1000,
+  "line_stoppage_cost_per_day": 100000,
+  "purchase_quantity": 5000,
+  "currency": "USD",
+  "purchase_terms": "Air Freight"
+}

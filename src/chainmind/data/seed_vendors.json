@@ -1,0 +1,38 @@
+[
+  {
+    "vendor_id": "vendor-a",
+    "vendor_name": "Vendor A",
+    "lead_time_days": 3,
+    "total_cost": 120000,
+    "currency": "USD",
+    "risk_score": 78,
+    "capacity": 10000
+  },
+  {
+    "vendor_id": "vendor-b",
+    "vendor_name": "Vendor B",
+    "lead_time_days": 2,
+    "total_cost": 135000,
+    "currency": "USD",
+    "risk_score": 88,
+    "capacity": 8000
+  },
+  {
+    "vendor_id": "vendor-c",
+    "vendor_name": "Vendor C",
+    "lead_time_days": 4,
+    "total_cost": 110000,
+    "currency": "USD",
+    "risk_score": 70,
+    "capacity": 12000
+  },
+  {
+    "vendor_id": "vendor-d",
+    "vendor_name": "Vendor D",
+    "lead_time_days": 5,
+    "total_cost": 100000,
+    "currency": "USD",
+    "risk_score": 60,
+    "capacity": 15000
+  }
+]

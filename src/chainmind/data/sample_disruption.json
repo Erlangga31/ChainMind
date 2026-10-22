@@ -1,0 +1,8 @@
+{
+  "title": "Extreme weather delays cargo ship",
+  "description": "Severe weather has delayed the vessel carrying Microchip X by five days.",
+  "component_id": "microchip-x",
+  "component_name": "Microchip X",
+  "delay_days": 5,
+  "source": "port-weather-monitor"
+}

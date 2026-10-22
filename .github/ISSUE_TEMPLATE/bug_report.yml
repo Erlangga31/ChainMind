@@ -1,0 +1,34 @@
+name: Bug report
+description: Laporkan bug yang dapat direproduksi di ChainMind.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gunakan data demonstrasi; jangan menyertakan kredensial, data SAP rahasia, atau informasi sensitif.
+  - type: textarea
+    id: description
+    attributes:
+      label: Deskripsi masalah
+      description: Apa yang terjadi dan apa yang Anda harapkan?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Langkah reproduksi
+      description: Berikan langkah dan payload fixture yang aman.
+      placeholder: |
+        1. Jalankan API dalam mode mock
+        2. Trigger demo disruption
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Lingkungan
+      description: OS, Python/Node, dan langkah CI yang gagal (jangan sertakan secret).
+    validations:
+      required: false
