@@ -58,11 +58,13 @@ flowchart LR
 | Tahap | Demo lokal | Target AWS/SAP |
 | --- | --- | --- |
 | Ingest dan run history | FastAPI, event store in-memory | API Gateway, EventBridge, DynamoDB |
-| Monitoring | JSON inventory seed, Monitoring Agent | Lambda, SAP S/4HANA melalui SAP Integration Suite |
+| Monitoring | JSON inventory seed, Monitoring Agent, SAP sandbox Event Mesh | Lambda, SAP S/4HANA melalui SAP Integration Suite |
 | Analisis logistik | Logistics Agent dan seed ekonomi produksi | Lambda dan data SAP |
 | Perbandingan pengadaan | JSON seed vendor, Procurement Agent | Lambda dan SAP Ariba Network melalui SAP Integration Suite |
 | Pemilihan dan rationale | Orchestrator Agent, MockLLMClient | Lambda, Bedrock Converse, artefak audit privat di S3 |
 | Approval dan eksekusi | API/dashboard dan mock SAP | Step Functions callback, otorisasi manusia, SAP S/4HANA |
+
+Sandbox SAP lokal pada `sandbox/sap_sandbox/` menyediakan endpoint OData, vendor Ariba, webhook Event Mesh, dan workflow approval simulasi. Sandbox ini membantu pengujian kontrak HTTP lokal; bukan koneksi atau tenant SAP produksi.
 
 Stack CDK mendefinisikan service AWS dan callback wait. Pengaitan endpoint keputusan lokal/API dengan token callback Step Functions dan koneksi SAP nyata masih termasuk pekerjaan sebelum deployment produksi.
 
@@ -108,8 +110,8 @@ Dari root proyek:
 
 ```powershell
 uv run pytest -q
-uv run ruff check src tests scripts infra
-uv run ruff format --check src tests scripts infra
+uv run ruff check src tests scripts infra sandbox
+uv run ruff format --check src tests scripts infra sandbox
 uv pip install --python .venv\Scripts\python.exe -r infra\requirements.txt
 cd infra
 npx --yes aws-cdk synth
@@ -136,8 +138,20 @@ Salin `.env.example` ke `.env` bila ingin mengubah konfigurasi lokal. `.env` tid
 | `CHAINMIND_ARTIFACT_BUCKET_NAME` | `chainmind-artifacts` | Nama bucket artefak yang dapat dikonfigurasi |
 | `CHAINMIND_API_CORS_ORIGINS` | `["http://localhost:5173","http://127.0.0.1:5173"]` | Daftar origin JSON yang diizinkan |
 | `CHAINMIND_SAP_BASE_URL` | — | Titik konfigurasi untuk integrasi SAP mendatang |
+| `SAP_SANDBOX_EVENT_WEBHOOK_URL` | `http://127.0.0.1:8000/disruptions` | Tujuan webhook Event Mesh simulator lokal |
+| `SAP_SANDBOX_WORKFLOW_CALLBACK_URL` | `http://127.0.0.1:8000` | Base URL callback workflow simulator lokal |
 
 AWS credentials tidak dimasukkan ke berkas konfigurasi proyek: boto3 menggunakan AWS credential chain standar.
+
+### SAP sandbox lokal
+
+Jalankan di terminal lain:
+
+```powershell
+uv run uvicorn sap_sandbox.main:app --app-dir sandbox --host 127.0.0.1 --port 8100 --reload
+```
+
+OpenAPI UI tersedia di `http://localhost:8100/docs`. Simulator mencakup OData stock dan purchase order, Ariba sourcing/offer, OAuth token demo, Event Mesh webhook, workflow approval callback, dan empat skenario gangguan. `make run-sap-sandbox` menjalankan perintah server yang sama pada lingkungan yang menyediakan `make`.
 
 ## Struktur proyek
 
@@ -148,6 +162,7 @@ chainmind/
 ├── docs/                    # Arsitektur, API, dan skenario presentasi
 ├── infra/                    # AWS CDK untuk Python
 ├── scripts/                  # Demo CLI
+├── sandbox/sap_sandbox/      # Simulator lokal OData, Ariba, Event Mesh, workflow
 ├── src/chainmind/
 │   ├── agents/               # Monitoring, logistics, procurement, orchestrator
 │   ├── api/                  # FastAPI routes

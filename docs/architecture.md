@@ -5,6 +5,8 @@
 ```mermaid
 flowchart TD
     Ext[Weather / logistics alert] --> EB[Amazon EventBridge bus]
+    SAPEvents[SAP Event Mesh webhook] --> Sandbox[Local SAP sandbox in development]
+    Sandbox --> API
     UI[React + Vite dashboard] --> API[FastAPI]
     API --> Core[Framework-agnostic core pipeline]
     EB --> SF[AWS Step Functions]
@@ -41,6 +43,11 @@ For local development the FastAPI route calls the same sequential pipeline used 
 | Human approval | `DisruptionPipeline.decide` | FastAPI / dashboard | Step Functions callback token (API completion wiring remains a deployment TODO) |
 | PO execution | `SAPClient.execute_purchase_order` | Mock S/4HANA in-memory record | S/4HANA via SAP Integration Suite, only after approval |
 | Run/audit storage | `EventStore` | Thread-safe process memory | DynamoDB event table and private S3 rationale artifacts |
+
+The separate local SAP sandbox (`sandbox/sap_sandbox/`) exposes OData-like S/4HANA material-stock
+and purchase-order routes, seeded Ariba vendors, an Event Mesh webhook simulator, and a Business
+Workflow approval callback simulator. It uses the same inventory and vendor seed fixtures as the
+application. These routes are local contract-test fixtures, not production SAP integrations.
 
 The `core` package contains Pydantic domain models, agent decisions, audit entries, and the sequential workflow. FastAPI, Lambda, boto3-backed storage, Bedrock, and SAP are adapters around that logic. The orchestration calculation is deterministic; the LLM client explains the result and does not choose or override the winning vendor.
 
