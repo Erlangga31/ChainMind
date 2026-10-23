@@ -4,9 +4,8 @@ from typing import Any
 
 import httpx
 from fastapi.testclient import TestClient
-
-from sandbox.sap_sandbox.config import SandboxSettings
-from sandbox.sap_sandbox.main import create_app
+from sap_sandbox.config import SandboxSettings
+from sap_sandbox.main import create_app
 
 
 def make_client() -> TestClient:
@@ -221,7 +220,7 @@ def test_scenarios_include_weather_geopolitics_supplier_failure_and_congestion()
 def test_event_mesh_injects_scenario_to_configured_webhook(
     monkeypatch: Any,
 ) -> None:
-    import sandbox.sap_sandbox.main as sandbox_main
+    import sap_sandbox.main as sandbox_main
 
     delivered: list[tuple[str, dict[str, Any], str | None, bool]] = []
 
@@ -249,7 +248,7 @@ def test_event_mesh_injects_scenario_to_configured_webhook(
 
 
 def test_event_mesh_reports_webhook_failure(monkeypatch: Any) -> None:
-    import sandbox.sap_sandbox.main as sandbox_main
+    import sap_sandbox.main as sandbox_main
 
     async def fail_webhook(
         _: str,
@@ -278,7 +277,7 @@ def test_event_mesh_reports_webhook_failure(monkeypatch: Any) -> None:
 
 
 def test_workflow_task_is_idempotent_and_callback_runs_once(monkeypatch: Any) -> None:
-    import sandbox.sap_sandbox.main as sandbox_main
+    import sap_sandbox.main as sandbox_main
 
     delivered: list[tuple[str, dict[str, Any], dict[str, str] | None]] = []
 
@@ -317,7 +316,7 @@ def test_workflow_task_is_idempotent_and_callback_runs_once(monkeypatch: Any) ->
 
 
 def test_workflow_rejects_conflicting_duplicate_decision(monkeypatch: Any) -> None:
-    import sandbox.sap_sandbox.main as sandbox_main
+    import sap_sandbox.main as sandbox_main
 
     async def capture_webhook(
         _: str,

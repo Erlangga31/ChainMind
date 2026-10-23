@@ -7,9 +7,8 @@ from time import monotonic, sleep
 
 import pytest
 import uvicorn
-
-from sandbox.sap_sandbox.config import SandboxSettings
-from sandbox.sap_sandbox.main import create_app
+from sap_sandbox.config import SandboxSettings
+from sap_sandbox.main import create_app
 
 
 @pytest.fixture
