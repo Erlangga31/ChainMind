@@ -1,5 +1,6 @@
 """FastAPI endpoints for disruptions, run history, and human decisions."""
 
+import json
 import logging
 from datetime import UTC, datetime
 from uuid import UUID
@@ -53,6 +54,33 @@ app.add_middleware(
 )
 
 
+def _structured_log(
+    event_name: str,
+    *,
+    run_id: UUID | None = None,
+    **fields: str,
+) -> None:
+    """Emit a JSON record containing only explicitly safe operational fields."""
+
+    safe_fields = {
+        key: value
+        for key, value in fields.items()
+        if key in {"mode", "status", "decision", "event_type", "exception_type"}
+    }
+    log_method = logger.error if event_name == "unexpected_api_error" else logger.info
+    log_method(
+        json.dumps(
+            {
+                "timestamp": datetime.now(UTC).isoformat(),
+                "event": event_name,
+                "run_id": str(run_id) if run_id else None,
+                **safe_fields,
+            },
+            separators=(",", ":"),
+        )
+    )
+
+
 @app.exception_handler(ChainMindError)
 async def chainmind_error_handler(_: Request, exc: ChainMindError) -> JSONResponse:
     """Translate expected domain and integration failures to structured JSON."""
@@ -76,12 +104,14 @@ async def request_validation_handler(_: Request, exc: RequestValidationError) ->
 
 
 @app.exception_handler(Exception)
-async def unexpected_error_handler(_: Request, exc: Exception) -> JSONResponse:
-    """Log unexpected failures without exposing stack traces or internals."""
+async def unexpected_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Log unexpected failure type without exposing request data or exception details."""
 
-    logger.error(
-        "Unexpected API error",
-        exc_info=(type(exc), exc, exc.__traceback__),
+    _structured_log(
+        "unexpected_api_error",
+        run_id=UUID(request.path_params["run_id"]) if request.path_params.get("run_id") else None,
+        mode=settings.mode,
+        exception_type=type(exc).__name__,
     )
     return JSONResponse(
         status_code=500,
@@ -122,11 +152,24 @@ def ingest_disruption(
                 "The disruption could not be published to the workflow.",
                 status_code=503,
             ) from exc
+        _structured_log(
+            "disruption_published",
+            run_id=canonical_event_id,
+            mode=settings.mode,
+            event_type=event.event_type.value if event.event_type else "unclassified",
+        )
         return RunCreatedResponse(
             run_id=canonical_event_id,
             status=RunStatus.ANALYZING,
         )
     run = pipeline.run(event)
+    _structured_log(
+        "disruption_processed",
+        run_id=run.run_id,
+        mode=settings.mode,
+        status=run.status.value,
+        event_type=event.event_type.value if event.event_type else "unclassified",
+    )
     return RunCreatedResponse(run_id=run.run_id, status=run.status, severity=run.severity)
 
 
@@ -140,6 +183,12 @@ async def ingest_signed_event(request: Request) -> RunCreatedResponse:
         settings.event_bridge_secret,
     )
     run = pipeline.run(event)
+    _structured_log(
+        "signed_event_processed",
+        run_id=run.run_id,
+        mode=settings.mode,
+        status=run.status.value,
+    )
     return RunCreatedResponse(run_id=run.run_id, status=run.status, severity=run.severity)
 
 
@@ -252,8 +301,17 @@ def decide(
             status_code=403,
         )
     if settings.mode == "aws":
-        return _decide_aws(run_id, decision, role)
-    return pipeline.decide(run_id, decision)
+        result = _decide_aws(run_id, decision, role)
+    else:
+        result = pipeline.decide(run_id, decision)
+    _structured_log(
+        "human_decision_recorded",
+        run_id=run_id,
+        mode=settings.mode,
+        status=result.status.value,
+        decision=decision.decision.value,
+    )
+    return result
 
 
 def _decide_aws(run_id: UUID, decision: DecisionRequest, role: str) -> DecisionResult:

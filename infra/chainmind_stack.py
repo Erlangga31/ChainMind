@@ -15,7 +15,19 @@ from aws_cdk import (
     aws_bedrock as bedrock,
 )
 from aws_cdk import (
+    aws_cloudtrail as cloudtrail,
+)
+from aws_cdk import (
+    aws_cloudwatch as cloudwatch,
+)
+from aws_cdk import (
+    aws_cognito as cognito,
+)
+from aws_cdk import (
     aws_dynamodb as dynamodb,
+)
+from aws_cdk import (
+    aws_ec2 as ec2,
 )
 from aws_cdk import (
     aws_events as events,
@@ -27,7 +39,13 @@ from aws_cdk import (
     aws_iam as iam,
 )
 from aws_cdk import (
+    aws_kms as kms,
+)
+from aws_cdk import (
     aws_lambda as lambda_,
+)
+from aws_cdk import (
+    aws_logs as logs,
 )
 from aws_cdk import (
     aws_s3 as s3,
@@ -74,6 +92,51 @@ class ChainMindStack(Stack):
             f"arn:{self.partition}:bedrock:{self.region}::foundation-model/{bedrock_model_id}"
         )
         project_root = Path(__file__).resolve().parents[1]
+        encryption_key = kms.Key(
+            self,
+            "ChainMindEncryptionKey",
+            enable_key_rotation=True,
+            removal_policy=RemovalPolicy.RETAIN,
+            description="Customer-managed encryption for ChainMind application data.",
+        )
+        vpc = ec2.Vpc(
+            self,
+            "ChainMindVpc",
+            max_azs=2,
+            nat_gateways=1,
+            subnet_configuration=[
+                ec2.SubnetConfiguration(
+                    name="public",
+                    subnet_type=ec2.SubnetType.PUBLIC,
+                ),
+                ec2.SubnetConfiguration(
+                    name="private",
+                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,
+                ),
+            ],
+        )
+        private_subnets = ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)
+        vpc.add_gateway_endpoint(
+            "DynamoDBEndpoint",
+            service=ec2.GatewayVpcEndpointAwsService.DYNAMODB,
+            subnets=[private_subnets],
+        )
+        vpc.add_gateway_endpoint(
+            "S3Endpoint",
+            service=ec2.GatewayVpcEndpointAwsService.S3,
+            subnets=[private_subnets],
+        )
+        for endpoint_name, service in (
+            ("BedrockRuntimeEndpoint", ec2.InterfaceVpcEndpointAwsService.BEDROCK_RUNTIME),
+            ("SecretsManagerEndpoint", ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER),
+            ("CloudWatchLogsEndpoint", ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS),
+        ):
+            vpc.add_interface_endpoint(
+                endpoint_name,
+                service=service,
+                subnets=private_subnets,
+                private_dns_enabled=True,
+            )
         source = lambda_.Code.from_asset(
             str(project_root / "src"),
             exclude=["**/__pycache__/**", "**/*.pyc"],
@@ -89,14 +152,16 @@ class ChainMindStack(Stack):
             point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
                 point_in_time_recovery_enabled=True
             ),
-            encryption=dynamodb.TableEncryption.AWS_MANAGED,
+            encryption=dynamodb.TableEncryption.CUSTOMER_MANAGED,
+            encryption_key=encryption_key,
             removal_policy=RemovalPolicy.RETAIN,
         )
         workflow_dlq = sqs.Queue(
             self,
             "WorkflowDeadLetterQueue",
             queue_name="chainmind-workflow-dlq",
-            encryption=sqs.QueueEncryption.SQS_MANAGED,
+            encryption=sqs.QueueEncryption.KMS,
+            encryption_master_key=encryption_key,
             retention_period=Duration.days(14),
         )
 
@@ -107,8 +172,15 @@ class ChainMindStack(Stack):
             bucket_name=None,
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             enforce_ssl=True,
-            encryption=s3.BucketEncryption.S3_MANAGED,
+            encryption=s3.BucketEncryption.KMS,
+            encryption_key=encryption_key,
             versioned=True,
+            lifecycle_rules=[
+                s3.LifecycleRule(
+                    expiration=Duration.days(365),
+                    noncurrent_version_expiration=Duration.days(90),
+                )
+            ],
             removal_policy=RemovalPolicy.RETAIN,
         )
 
@@ -119,6 +191,12 @@ class ChainMindStack(Stack):
             *,
             environment: dict[str, str] | None = None,
         ) -> lambda_.Function:
+            function_log_group = logs.LogGroup(
+                self,
+                f"{logical_id}LogGroup",
+                retention=logs.RetentionDays.ONE_MONTH,
+                removal_policy=RemovalPolicy.RETAIN,
+            )
             return lambda_.Function(
                 self,
                 logical_id,
@@ -127,6 +205,9 @@ class ChainMindStack(Stack):
                 code=source,
                 memory_size=512,
                 timeout=Duration.seconds(30),
+                log_group=function_log_group,
+                vpc=vpc,
+                vpc_subnets=private_subnets,
                 description=description,
                 environment={
                     "CHAINMIND_MODE": chainmind_mode,
@@ -198,6 +279,7 @@ class ChainMindStack(Stack):
         api_handler.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["states:SendTaskSuccess", "states:SendTaskFailure"],
+                # Callback APIs authorize by opaque task token, not state-machine ARN.
                 resources=["*"],
             )
         )
@@ -207,6 +289,7 @@ class ChainMindStack(Stack):
             "EventBridgeSharedSecret",
             secret_name="chainmind/event-bridge",
             description="HMAC shared secret for trusted Event Mesh event ingestion.",
+            encryption_key=encryption_key,
             generate_secret_string=secretsmanager.SecretStringGenerator(
                 password_length=48,
                 exclude_punctuation=True,
@@ -218,6 +301,7 @@ class ChainMindStack(Stack):
             "NotificationLinkSigningSecret",
             secret_name="chainmind/notification-links",
             description="HMAC key used to sign expiring notification action links.",
+            encryption_key=encryption_key,
             generate_secret_string=secretsmanager.SecretStringGenerator(
                 password_length=48,
                 exclude_punctuation=True,
@@ -236,6 +320,13 @@ class ChainMindStack(Stack):
             "Escalate approvals that remain pending beyond their configured age.",
         )
         event_store.grant_read_write_data(overdue_notifier)
+        for artifact_writer in (
+            approval_callback,
+            execute_order,
+            track_execution,
+            overdue_notifier,
+        ):
+            artifacts.grant_put(artifact_writer, "runs/*")
         notification_link_secret.grant_read(overdue_notifier)
         overdue_notifier.add_environment(
             "CHAINMIND_NOTIFICATION_LINK_SECRET_ID",
@@ -796,19 +887,103 @@ class ChainMindStack(Stack):
             targets=[event_targets.LambdaFunction(overdue_notifier)],
         )
 
+        user_pool = cognito.UserPool(
+            self,
+            "ChainMindUserPool",
+            user_pool_name="chainmind-approvers",
+            self_sign_up_enabled=False,
+            sign_in_aliases=cognito.SignInAliases(email=True),
+            password_policy=cognito.PasswordPolicy(
+                min_length=12,
+                require_digits=True,
+                require_lowercase=True,
+                require_uppercase=True,
+                require_symbols=True,
+            ),
+            removal_policy=RemovalPolicy.RETAIN,
+        )
+        for role_name in ("viewer", "approver"):
+            cognito.CfnUserPoolGroup(
+                self,
+                f"{role_name.title()}UserGroup",
+                user_pool_id=user_pool.user_pool_id,
+                group_name=role_name,
+            )
+        callback_url = str(
+            self.node.try_get_context("dashboardCallbackUrl") or "http://localhost:5173/"
+        )
+        dashboard_client = user_pool.add_client(
+            "DashboardSpaClient",
+            user_pool_client_name="chainmind-dashboard",
+            generate_secret=False,
+            auth_flows=cognito.AuthFlow(user_srp=True),
+            o_auth=cognito.OAuthSettings(
+                flows=cognito.OAuthFlows(authorization_code_grant=True),
+                scopes=[cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL],
+                callback_urls=[callback_url],
+                logout_urls=[callback_url],
+            ),
+        )
+        user_pool.add_domain(
+            "ChainMindHostedAuthDomain",
+            cognito_domain=cognito.CognitoDomainOptions(
+                domain_prefix=f"chainmind-{self.account}-{self.region}"
+            ),
+        )
+        authorizer = apigateway.CognitoUserPoolsAuthorizer(
+            self,
+            "ChainMindCognitoAuthorizer",
+            cognito_user_pools=[user_pool],
+            authorizer_name="chainmind-cognito",
+        )
+        api_access_logs = logs.LogGroup(
+            self,
+            "ApiGatewayAccessLogs",
+            retention=logs.RetentionDays.ONE_MONTH,
+            removal_policy=RemovalPolicy.RETAIN,
+        )
+
         # API Gateway forwards the documented API surface to the FastAPI Lambda.
         api = apigateway.RestApi(
             self,
             "ChainMindRestApi",
             rest_api_name="ChainMind API",
+            default_method_options=apigateway.MethodOptions(
+                authorizer=authorizer,
+                authorization_type=apigateway.AuthorizationType.COGNITO,
+            ),
             default_cors_preflight_options=apigateway.CorsOptions(
                 allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
                 allow_methods=["GET", "POST", "OPTIONS"],
-                allow_headers=["Content-Type", "X-ChainMind-Role"],
+                allow_headers=["Authorization", "Content-Type", "X-ChainMind-Role"],
+            ),
+            deploy_options=apigateway.StageOptions(
+                stage_name="v1",
+                logging_level=apigateway.MethodLoggingLevel.INFO,
+                data_trace_enabled=False,
+                metrics_enabled=True,
+                throttling_rate_limit=20,
+                throttling_burst_limit=40,
+                access_log_destination=apigateway.LogGroupLogDestination(api_access_logs),
+                access_log_format=apigateway.AccessLogFormat.json_with_standard_fields(
+                    caller=False,
+                    http_method=True,
+                    ip=True,
+                    protocol=True,
+                    request_time=True,
+                    resource_path=True,
+                    response_length=True,
+                    status=True,
+                    user=False,
+                ),
             ),
         )
         integration = apigateway.LambdaIntegration(api_handler)
-        api.root.add_resource("health").add_method("GET", integration)
+        api.root.add_resource("health").add_method(
+            "GET",
+            integration,
+            authorization_type=apigateway.AuthorizationType.NONE,
+        )
         api.root.add_resource("disruptions").add_method("POST", integration)
         api.root.add_resource("kpis").add_method("GET", integration)
         notification_links = api.root.add_resource("notifications").add_resource("links")
@@ -818,6 +993,7 @@ class ChainMindStack(Stack):
         api.root.add_resource("event-bridge").add_method(
             "POST",
             apigateway.LambdaIntegration(event_bridge_handler),
+            authorization_type=apigateway.AuthorizationType.NONE,
         )
         runs = api.root.add_resource("runs")
         runs.add_method("GET", integration)
@@ -825,8 +1001,63 @@ class ChainMindStack(Stack):
         run.add_method("GET", integration)
         run.add_resource("decision").add_method("POST", integration)
 
+        cloudtrail.Trail(
+            self,
+            "ChainMindCloudTrail",
+            bucket=artifacts,
+            encryption_key=encryption_key,
+            enable_file_validation=True,
+            include_global_service_events=False,
+            is_multi_region_trail=True,
+            send_to_cloud_watch_logs=True,
+            cloud_watch_logs_retention=logs.RetentionDays.ONE_MONTH,
+        )
+        cloudwatch.Alarm(
+            self,
+            "FailedWorkflowAlarm",
+            metric=state_machine.metric_failed(),
+            threshold=1,
+            evaluation_periods=1,
+            treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+            alarm_description="At least one ChainMind workflow execution failed.",
+        )
+        cloudwatch.Alarm(
+            self,
+            "WorkflowDlqDepthAlarm",
+            metric=workflow_dlq.metric_approximate_number_of_messages_visible(),
+            threshold=1,
+            evaluation_periods=1,
+            treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+            alarm_description="A message is waiting in the ChainMind workflow DLQ.",
+        )
+        cloudwatch.Dashboard(
+            self,
+            "ChainMindOperationsDashboard",
+            dashboard_name="ChainMind-Operations",
+            widgets=[
+                [
+                    cloudwatch.GraphWidget(
+                        title="Workflow executions",
+                        left=[
+                            state_machine.metric_succeeded(),
+                            state_machine.metric_failed(),
+                            state_machine.metric_timed_out(),
+                        ],
+                        width=12,
+                    ),
+                    cloudwatch.GraphWidget(
+                        title="Workflow dead-letter queue",
+                        left=[workflow_dlq.metric_approximate_number_of_messages_visible()],
+                        width=12,
+                    ),
+                ]
+            ],
+        )
+
         CfnOutput(self, "ApiUrl", value=api.url)
         CfnOutput(self, "EventBusName", value=event_bus.event_bus_name)
         CfnOutput(self, "StateMachineArn", value=state_machine.state_machine_arn)
         CfnOutput(self, "EventStoreName", value=event_store.table_name)
         CfnOutput(self, "AuditArtifactsBucket", value=artifacts.bucket_name)
+        CfnOutput(self, "CognitoUserPoolId", value=user_pool.user_pool_id)
+        CfnOutput(self, "CognitoDashboardClientId", value=dashboard_client.user_pool_client_id)

@@ -1,5 +1,7 @@
 """DynamoDB-backed run store for AWS deployments."""
 
+import json
+import os
 from uuid import UUID
 
 import boto3
@@ -22,7 +24,7 @@ class DynamoDBEventStore(RunStore):
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
 
     def save(self, run: DisruptionRun) -> None:
-        """Write the current JSON run snapshot to DynamoDB."""
+        """Write the run snapshot to DynamoDB and its audit evidence to S3."""
 
         try:
             self._table.put_item(
@@ -41,6 +43,27 @@ class DynamoDBEventStore(RunStore):
                     "linked_run_id": str(run.run_id),
                 }
             )
+            artifact_bucket = os.environ.get("CHAINMIND_ARTIFACT_BUCKET")
+            if artifact_bucket:
+                payload = {
+                    "run_id": str(run.run_id),
+                    "event_id": str(run.event.event_id),
+                    "audit_log": [entry.model_dump(mode="json") for entry in run.audit_log],
+                    "trace_steps": [step.model_dump(mode="json") for step in run.trace_steps],
+                    "chain_of_thought": run.chain_of_thought,
+                }
+                boto3.client("s3").put_object(
+                    Bucket=artifact_bucket,
+                    Key=f"runs/{run.run_id}/audit.json",
+                    Body=run.model_dump_json().encode("utf-8"),
+                    ContentType="application/json",
+                )
+                boto3.client("s3").put_object(
+                    Bucket=artifact_bucket,
+                    Key=f"runs/{run.run_id}/trace-audit.json",
+                    Body=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+                    ContentType="application/json",
+                )
         except (BotoCoreError, ClientError) as exc:
             raise IntegrationError(
                 "The disruption run could not be saved to DynamoDB.",

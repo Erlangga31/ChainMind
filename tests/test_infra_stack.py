@@ -16,9 +16,31 @@ def test_stack_contains_expected_workflow_and_agent_lambdas() -> None:
     template.resource_count_is("AWS::Events::EventBus", 1)
     template.resource_count_is("AWS::Events::Rule", 3)
     template.resource_count_is("AWS::SecretsManager::Secret", 2)
+    template.resource_count_is("AWS::KMS::Key", 1)
+    template.resource_count_is("AWS::EC2::VPC", 1)
+    template.resource_count_is("AWS::EC2::VPCEndpoint", 5)
+    template.resource_count_is("AWS::Cognito::UserPool", 1)
+    template.resource_count_is("AWS::Cognito::UserPoolClient", 1)
+    template.resource_count_is("AWS::Cognito::UserPoolGroup", 2)
+    template.resource_count_is("AWS::ApiGateway::Authorizer", 1)
+    template.resource_count_is("AWS::CloudTrail::Trail", 1)
+    template.resource_count_is("AWS::CloudWatch::Alarm", 2)
+    template.resource_count_is("AWS::CloudWatch::Dashboard", 1)
     template.has_resource_properties(
         "AWS::SecretsManager::Secret",
         {"Name": "chainmind/notification-links"},
+    )
+    template.has_resource_properties(
+        "AWS::DynamoDB::Table",
+        {"SSESpecification": {"SSEEnabled": True, "SSEType": "KMS"}},
+    )
+    template.has_resource_properties(
+        "AWS::ApiGateway::Stage",
+        {"MethodSettings": Match.array_with([Match.object_like({"ThrottlingRateLimit": 20})])},
+    )
+    template.has_resource_properties(
+        "AWS::ApiGateway::Method",
+        {"AuthorizationType": "COGNITO_USER_POOLS"},
     )
     template.has_resource_properties(
         "AWS::Events::Rule",

@@ -13,16 +13,16 @@ flowchart TD
     API --> Core[Framework-agnostic core pipeline]
     EB --> SF[AWS Step Functions]
     SF --> M[1. Monitoring Agent]
-    M -->|significant| L[2. Logistics Agent]
+    M -->|significant| L[2. Impact analysis / Logistics Agent]
     M -->|not significant| Stop[Record and stop]
-    L --> P[3. Procurement Agent]
-    P --> O[4. Orchestrator Agent]
+    L --> P[3. Search solutions / Procurement Agent]
+    P --> O[4. Decision analysis / Orchestrator Agent]
     O --> Draft[Draft PO: PENDING_APPROVAL]
-    Draft --> Human{Human approval}
+    Draft --> Human{5. Human-in-the-loop}
     Human -->|revise| O
     Human -->|reject| Rejected[Rejected; no SAP execution]
-    Human -->|approve| Execute[Approved / execute PO]
-    Execute --> Track[Ariba supplier confirmation + ASN / ETA]
+    Human -->|approve| Execute[6. Execute Purchase Order]
+    Execute --> Track[Supplier confirmation + ASN / ETA tracking]
     Track --> Projection[S/4HANA illustrative inventory projection]
     Projection --> KPIs[Per-run and aggregate illustrative KPIs]
     KPIs --> Done[Tracking complete]
@@ -44,7 +44,7 @@ flowchart TD
     O --> Audit[(Private S3 audit / rationale artifacts)]
 ```
 
-For local development the FastAPI route calls the same sequential pipeline used by the CLI and does not contact AWS. The stack definition models the AWS event-driven path separately. Each run presents seven timeline entries in the dashboard: monitoring, logistics, procurement, orchestrator, human approval, PO execution, and supplier execution/tracking. The first four are agent stages; the approval gate precedes execution and tracking.
+For local development the FastAPI route calls the same sequential pipeline used by the CLI and does not contact AWS. The stack definition models the AWS event-driven path separately. The dashboard groups the internal states into six stages: Deteksi Gangguan, Analisis Dampak, Pencarian Solusi, Analisis & Keputusan, Human-in-the-Loop, and Eksekusi Purchase Order (including tracking detail). The internal run retains separate agent, approval, execution, and tracking records for audit. This stage naming is derived from the written hackathon requirements because the proposal PDF was not present in the workspace.
 
 ## Stage responsibilities and service mapping
 
@@ -61,7 +61,7 @@ For local development the FastAPI route calls the same sequential pipeline used 
 | Execution and tracking | `TrackingAgent`, typed confirmation/ASN/projection/KPI models | Ariba sandbox confirms the submitted PO and returns a vendor-specific ETA; projection is separate from current stock | Tracking Lambda after execution; Ariba confirmation/ASN; custom S/4HANA projection API |
 | KPI reporting | `RunKPI`, aggregate `GET /kpis` | Values marked simulated/illustrative | DynamoDB-backed run aggregation; not a financial forecast |
 | Notifications | `NotificationService` and `Notifier` contract | Console, JSONL email outbox, configurable mock webhooks | Teams/Slack webhooks, SES, scheduled pending-approval scan, Step Functions timeout escalation |
-| Run/audit storage | `RunStore` contract | SQLite snapshots and unique idempotency key (configurable, defaults to `data/chainmind-events.sqlite3`) | DynamoDB run records and event-key index; private S3 rationale artifacts |
+| Run/audit storage | `RunStore` contract | SQLite snapshots and unique idempotency key (configurable, defaults to `data/chainmind-events.sqlite3`) | KMS-encrypted DynamoDB run records and event-key index; versioned S3 run audit/trace artifacts |
 
 The separate local SAP sandbox (`sandbox/sap_sandbox/`) exposes OData-like S/4HANA material-stock
 and purchase-order routes, seeded Ariba vendors, an HMAC-signed Event Mesh webhook simulator, and
@@ -133,4 +133,4 @@ restarts by default. AWS mode reads the signing key from Secrets Manager.
 - Event bridge Lambda: reads only the dedicated HMAC secret and can publish only to the configured event bus.
 - Scheduled poller Lambda: can publish only to the configured event bus; network access for optional Open-Meteo remains a deployment configuration concern.
 
-The CDK app uses an encrypted, versioned S3 bucket with public access blocked, TLS enforced, and a DynamoDB table with on-demand capacity and point-in-time recovery. These defaults are a foundation, not a complete production security review.
+The CDK app uses a customer-managed KMS key, a versioned S3 bucket with public access blocked, TLS enforced and lifecycle retention, and a DynamoDB table with on-demand capacity and point-in-time recovery. Lambda functions are placed in private subnets with S3/DynamoDB gateway endpoints and Bedrock, Secrets Manager, and CloudWatch Logs interface endpoints. Cognito authorizes protected API Gateway methods; `/health` stays public and the signed event bridge uses HMAC. CloudTrail, API/Lambda log retention, throttling, workflow/DLQ alarms, and an operations dashboard are synthesized. These are infrastructure scaffolds, not a completed production security review or runtime validation.
