@@ -2,7 +2,7 @@
 
 from chainmind.core.config import Settings, get_settings
 from chainmind.core.errors import IntegrationError
-from chainmind.core.events import EventStore, RunStore
+from chainmind.core.events import RunStore, SQLiteEventStore
 from chainmind.integrations.aws.event_store import DynamoDBEventStore
 from chainmind.integrations.llm.base import LLMClient
 from chainmind.integrations.llm.bedrock import BedrockLLMClient
@@ -105,6 +105,6 @@ def create_pipeline(
         or (
             DynamoDBEventStore(config.event_table_name, config.aws_region)
             if config.mode == "aws"
-            else EventStore()
+            else SQLiteEventStore(config.event_database_path)
         ),
     )

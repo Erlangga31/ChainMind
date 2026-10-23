@@ -3,7 +3,7 @@
 import logging
 from uuid import UUID
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Header, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +20,7 @@ from chainmind.core.models import (
     RunCreatedResponse,
 )
 from chainmind.factory import create_pipeline
+from chainmind.integrations.external.signing import parse_signed_event
 
 logger = logging.getLogger("chainmind.api")
 settings = get_settings()
@@ -34,7 +35,7 @@ app.add_middleware(
     allow_origins=settings.api_cors_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "X-ChainMind-Signature", "Idempotency-Key"],
 )
 
 
@@ -86,9 +87,27 @@ def health() -> dict[str, str]:
 
 
 @app.post("/disruptions", response_model=RunCreatedResponse, status_code=201)
-def ingest_disruption(event: DisruptionEvent) -> RunCreatedResponse:
+def ingest_disruption(
+    event: DisruptionEvent,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> RunCreatedResponse:
     """Accept an event and run the disruption response pipeline."""
 
+    if idempotency_key:
+        event.idempotency_key = idempotency_key
+    run = pipeline.run(event)
+    return RunCreatedResponse(run_id=run.run_id, status=run.status, severity=run.severity)
+
+
+@app.post("/event-bridge", response_model=RunCreatedResponse, status_code=202)
+async def ingest_signed_event(request: Request) -> RunCreatedResponse:
+    """Verify the Event Mesh HMAC signature before processing its event."""
+
+    event = parse_signed_event(
+        await request.body(),
+        request.headers,
+        settings.event_bridge_secret,
+    )
     run = pipeline.run(event)
     return RunCreatedResponse(run_id=run.run_id, status=run.status, severity=run.severity)
 

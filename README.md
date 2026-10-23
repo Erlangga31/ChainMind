@@ -57,14 +57,16 @@ flowchart LR
 
 | Tahap | Demo lokal | Target AWS/SAP |
 | --- | --- | --- |
-| Ingest dan run history | FastAPI, event store in-memory | API Gateway, EventBridge, DynamoDB |
-| Monitoring | JSON inventory seed, Monitoring Agent, SAP sandbox Event Mesh | Lambda, SAP S/4HANA melalui SAP Integration Suite |
+| Ingest dan run history | FastAPI, HMAC event bridge, SQLite idempotency store | API Gateway, Secrets Manager, EventBridge, DynamoDB |
+| Monitoring | JSON inventory dan shipment records, empat klasifikasi, mock event feeds | Lambda, SAP S/4HANA melalui SAP Integration Suite |
 | Analisis logistik | Logistics Agent dan seed ekonomi produksi | Lambda dan data SAP |
 | Perbandingan pengadaan | JSON seed vendor, Procurement Agent | Lambda dan SAP Ariba Network melalui SAP Integration Suite |
 | Pemilihan dan rationale | Orchestrator Agent, MockLLMClient | Lambda, Bedrock Converse, artefak audit privat di S3 |
 | Approval dan eksekusi | API/dashboard dan mock SAP | Step Functions callback, otorisasi manusia, SAP S/4HANA |
 
 Sandbox SAP lokal pada `sandbox/sap_sandbox/` menyediakan endpoint OData, vendor Ariba, webhook Event Mesh, dan workflow approval simulasi. Sandbox ini membantu pengujian kontrak HTTP lokal; bukan koneksi atau tenant SAP produksi.
+
+Event Mesh simulator mengirim event ke `/event-bridge` dengan HMAC-SHA256. Untuk menjalankan kedua proses lokal, isi `CHAINMIND_EVENT_BRIDGE_SECRET` dan `SAP_SANDBOX_EVENT_BRIDGE_SECRET` dengan shared secret yang sama dan non-empty. `OpenMeteoWeatherClient` adalah integrasi opsional yang disabled by default; sumber gangguan lain memakai skenario mock offline.
 
 Stack CDK mendefinisikan service AWS dan callback wait. Pengaitan endpoint keputusan lokal/API dengan token callback Step Functions dan koneksi SAP nyata masih termasuk pekerjaan sebelum deployment produksi.
 
@@ -141,6 +143,9 @@ Salin `.env.example` ke `.env` bila ingin mengubah konfigurasi lokal. `.env` tid
 | `CHAINMIND_RETRY_ATTEMPTS` | `3` | Percobaan maksimal integrasi |
 | `CHAINMIND_RETRY_BASE_DELAY_SECONDS` | `0.1` | Jeda awal exponential backoff |
 | `CHAINMIND_EVENT_TABLE_NAME` | `chainmind-events` | Tabel event/run DynamoDB |
+| `CHAINMIND_EVENT_DATABASE_PATH` | `data/chainmind-events.sqlite3` | File SQLite run/event lokal dan index idempotensi |
+| `CHAINMIND_EVENT_BUS_NAME` | `chainmind` | Event bus tujuan event bridge dan external poller |
+| `CHAINMIND_EVENT_BRIDGE_SECRET` | — | HMAC secret untuk verifikasi signed event bridge lokal |
 | `CHAINMIND_ARTIFACT_BUCKET_NAME` | `chainmind-artifacts` | Nama bucket artefak yang dapat dikonfigurasi |
 | `CHAINMIND_API_CORS_ORIGINS` | `["http://localhost:5173","http://127.0.0.1:5173"]` | Daftar origin JSON yang diizinkan |
 | `CHAINMIND_SAP_BASE_URL` | — | Titik konfigurasi untuk integrasi SAP mendatang |
@@ -151,7 +156,8 @@ Salin `.env.example` ke `.env` bila ingin mengubah konfigurasi lokal. `.env` tid
 | `CHAINMIND_SAP_SECRETS_SECRET_ID` | — | Secrets Manager secret ID untuk AWS mode |
 | `CHAINMIND_SAP_TIMEOUT_SECONDS` | `10` | Timeout HTTP SAP |
 | `CHAINMIND_SAP_WORKFLOW_BASE_URL` | `http://127.0.0.1:8100` | Base URL Business Workflow sandbox |
-| `SAP_SANDBOX_EVENT_WEBHOOK_URL` | `http://127.0.0.1:8000/disruptions` | Tujuan webhook Event Mesh simulator lokal |
+| `SAP_SANDBOX_EVENT_WEBHOOK_URL` | `http://127.0.0.1:8000/event-bridge` | Tujuan webhook Event Mesh simulator lokal |
+| `SAP_SANDBOX_EVENT_BRIDGE_SECRET` | — | HMAC secret yang harus sama dengan `CHAINMIND_EVENT_BRIDGE_SECRET` |
 | `SAP_SANDBOX_WORKFLOW_CALLBACK_URL` | `http://127.0.0.1:8000` | Base URL callback workflow simulator lokal |
 
 AWS credentials tidak dimasukkan ke berkas konfigurasi proyek: boto3 menggunakan AWS credential chain standar.
@@ -183,7 +189,7 @@ chainmind/
 │   ├── core/                 # Model, config, audit, event store, retry
 │   ├── data/                 # Seed scenario, inventory, vendor
 │   ├── handlers/             # Wrapper AWS Lambda
-│   ├── integrations/         # LLM, SAP, AWS adapters
+│   ├── integrations/         # LLM, SAP, AWS, and external event adapters
 │   └── workflow/             # Pipeline empat stage framework-agnostic
 ├── tests/                    # Unit, API, retry, dan end-to-end
 ├── .env.example
@@ -198,6 +204,7 @@ chainmind/
 - [ ] Hubungkan endpoint approval ke callback token Step Functions (`SendTaskSuccess`/`SendTaskFailure`) dan tambahkan idempotensi.
 - [ ] Terapkan identity provider, otorisasi approver berbasis peran, dan secret management AWS Secrets Manager.
 - [ ] Perkuat retensi, audit log, observability, alarm, dan pengujian integrasi dengan SAP sandbox.
+- [ ] Uji deduplikasi serentak, rotasi HMAC, dan alur event end-to-end dalam akun AWS.
 
 **Disclaimer MVP:** integrasi SAP saat ini adalah mock/stub; seed data, event store mock, dan keputusan human-in-the-loop lokal dimaksudkan untuk demo. AWS CDK adalah scaffold yang dapat disintesis, bukan deployment atau sertifikasi kesiapan produksi.
 

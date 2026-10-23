@@ -14,6 +14,7 @@ def make_client() -> TestClient:
 
     settings = SandboxSettings(
         event_webhook_url="http://chainmind.test/disruptions",
+        event_bridge_secret="test-only-sandbox-secret",
         workflow_callback_url="http://chainmind.test",
     )
     client = TestClient(create_app(settings))
@@ -213,7 +214,7 @@ def test_scenarios_include_weather_geopolitics_supplier_failure_and_congestion()
         "weather",
         "geopolitical",
         "vendor_failure",
-        "port_congestion",
+        "logistics_delay",
     }
 
 
@@ -222,10 +223,16 @@ def test_event_mesh_injects_scenario_to_configured_webhook(
 ) -> None:
     import sandbox.sap_sandbox.main as sandbox_main
 
-    delivered: list[tuple[str, dict[str, Any]]] = []
+    delivered: list[tuple[str, dict[str, Any], str | None, bool]] = []
 
-    async def capture_webhook(url: str, payload: dict[str, Any]) -> None:
-        delivered.append((url, payload))
+    async def capture_webhook(
+        url: str,
+        payload: dict[str, Any],
+        secret: str | None = None,
+        *,
+        require_signature: bool = False,
+    ) -> None:
+        delivered.append((url, payload, secret, require_signature))
 
     monkeypatch.setattr(sandbox_main, "post_webhook", capture_webhook)
     client = make_client()
@@ -235,12 +242,20 @@ def test_event_mesh_injects_scenario_to_configured_webhook(
     assert response.status_code == 202
     assert delivered[0][0] == "http://chainmind.test/disruptions"
     assert delivered[0][1]["source"] == "geopolitical-risk-feed"
+    assert delivered[0][2] == "test-only-sandbox-secret"
+    assert delivered[0][3] is True
 
 
 def test_event_mesh_reports_webhook_failure(monkeypatch: Any) -> None:
     import sandbox.sap_sandbox.main as sandbox_main
 
-    async def fail_webhook(_: str, __: dict[str, Any]) -> None:
+    async def fail_webhook(
+        _: str,
+        __: dict[str, Any],
+        ___: str | None = None,
+        *,
+        require_signature: bool = False,
+    ) -> None:
         raise httpx.ConnectError("connection refused")
 
     monkeypatch.setattr(sandbox_main, "post_webhook", fail_webhook)
@@ -263,7 +278,14 @@ def test_workflow_task_is_idempotent_and_callback_runs_once(monkeypatch: Any) ->
 
     delivered: list[tuple[str, dict[str, Any]]] = []
 
-    async def capture_webhook(url: str, payload: dict[str, Any]) -> None:
+    async def capture_webhook(
+        url: str,
+        payload: dict[str, Any],
+        secret: str | None = None,
+        *,
+        require_signature: bool = False,
+    ) -> None:
+        del secret, require_signature
         delivered.append((url, payload))
 
     monkeypatch.setattr(sandbox_main, "post_webhook", capture_webhook)
@@ -291,7 +313,14 @@ def test_workflow_task_is_idempotent_and_callback_runs_once(monkeypatch: Any) ->
 def test_workflow_rejects_conflicting_duplicate_decision(monkeypatch: Any) -> None:
     import sandbox.sap_sandbox.main as sandbox_main
 
-    async def capture_webhook(_: str, __: dict[str, Any]) -> None:
+    async def capture_webhook(
+        _: str,
+        __: dict[str, Any],
+        ___: str | None = None,
+        *,
+        require_signature: bool = False,
+    ) -> None:
+        del require_signature
         return None
 
     monkeypatch.setattr(sandbox_main, "post_webhook", capture_webhook)

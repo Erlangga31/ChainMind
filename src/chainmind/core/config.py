@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     retry_attempts: int = Field(default=3, ge=1, le=8)
     retry_base_delay_seconds: float = Field(default=0.1, ge=0)
     event_table_name: str = "chainmind-events"
+    event_database_path: str = "data/chainmind-events.sqlite3"
+    event_bus_name: str = "chainmind"
+    event_bridge_secret: str | None = None
     artifact_bucket_name: str = "chainmind-artifacts"
     api_cors_origins: list[str] = Field(
         default_factory=lambda: [

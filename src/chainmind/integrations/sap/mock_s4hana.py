@@ -1,9 +1,15 @@
 """In-memory SAP S/4HANA adapter backed by packaged JSON seed data."""
 
+import json
 from importlib.resources import files
 
 from chainmind.core.errors import IntegrationError
-from chainmind.core.models import InventorySnapshot, PurchaseOrder
+from chainmind.core.models import (
+    AffectedSupplyChainRecords,
+    DisruptionEvent,
+    InventorySnapshot,
+    PurchaseOrder,
+)
 
 
 class MockSAPS4HANAClient:
@@ -12,7 +18,14 @@ class MockSAPS4HANAClient:
     def __init__(self) -> None:
         self._inventory: dict[str, InventorySnapshot] = {}
         self._orders: dict[str, PurchaseOrder] = {}
+        self._supply_chain_records: dict[str, dict[str, list[str]]] = {}
         self._load_inventory()
+        raw_records = (
+            files("chainmind.data")
+            .joinpath("seed_supply_chain_records.json")
+            .read_text(encoding="utf-8")
+        )
+        self._supply_chain_records = json.loads(raw_records)
 
     def _load_inventory(self) -> None:
         raw = files("chainmind.data").joinpath("seed_inventory.json").read_text(encoding="utf-8")
@@ -29,6 +42,25 @@ class MockSAPS4HANAClient:
                 f"SAP S/4HANA has no seeded inventory for component '{component_id}'.",
                 details={"component_id": component_id},
             ) from exc
+
+    def find_affected_records(self, event: DisruptionEvent) -> AffectedSupplyChainRecords:
+        """Match a disruption to seeded shipment and locally drafted order records."""
+
+        seeded = self._supply_chain_records.get(event.component_id, {})
+        open_orders = [
+            *seeded.get("open_purchase_order_ids", []),
+            *[
+                order.po_id.hex
+                for order in self._orders.values()
+                if order.component_id == event.component_id
+                and order.status not in {"EXECUTED", "REJECTED"}
+            ],
+        ]
+        return AffectedSupplyChainRecords(
+            component_id=event.component_id,
+            shipment_ids=seeded.get("shipment_ids", []),
+            open_purchase_order_ids=sorted(set(open_orders)),
+        )
 
     def create_draft_purchase_order(self, order: PurchaseOrder) -> PurchaseOrder:
         """Store a draft PO without triggering downstream financial execution."""

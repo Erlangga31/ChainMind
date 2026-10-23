@@ -24,6 +24,15 @@ class Severity(StrEnum):
     CRITICAL = "Critical"
 
 
+class DisruptionType(StrEnum):
+    """Supported external disruption classes."""
+
+    WEATHER = "weather"
+    LOGISTICS_DELAY = "logistics_delay"
+    GEOPOLITICAL = "geopolitical"
+    VENDOR_FAILURE = "vendor_failure"
+
+
 class RunStatus(StrEnum):
     """Lifecycle status for a disruption run."""
 
@@ -53,8 +62,25 @@ class DisruptionEvent(DomainModel):
     component_id: str = Field(default="microchip-x", min_length=1, max_length=100)
     component_name: str = Field(default="Microchip X", min_length=1, max_length=160)
     delay_days: float = Field(gt=0, le=365)
+    event_type: DisruptionType | None = None
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
     source: str = Field(default="external-logistics", max_length=100)
     occurred_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @property
+    def dedupe_key(self) -> str:
+        """Return a caller key or stable event identifier for duplicate detection."""
+
+        return self.idempotency_key or str(self.event_id)
+
+
+class AffectedSupplyChainRecords(DomainModel):
+    """SAP shipment and open-order records associated with a component."""
+
+    component_id: str
+    shipment_ids: list[str] = Field(default_factory=list)
+    open_purchase_order_ids: list[str] = Field(default_factory=list)
+    source: str = "SAP S/4HANA"
 
 
 class InventorySnapshot(DomainModel):
@@ -127,6 +153,8 @@ class MonitoringResult(AgentResult):
     severity: Severity
     significant: bool
     coverage_days: float
+    disruption_type: DisruptionType
+    affected_records: AffectedSupplyChainRecords
 
 
 class LogisticsResult(AgentResult):
@@ -198,6 +226,7 @@ class DisruptionRun(DomainModel):
     status: RunStatus = RunStatus.ANALYZING
     severity: Severity | None = None
     significant: bool = False
+    affected_records: AffectedSupplyChainRecords | None = None
     stages: list[StageResult] = Field(default_factory=list)
     vendor_comparison: list[VendorEvaluation] = Field(default_factory=list)
     selected_vendor_id: str | None = None

@@ -66,6 +66,9 @@ class DisruptionPipeline:
     def run(self, event: DisruptionEvent) -> DisruptionRun:
         """Execute the four agent stages and persist a draft awaiting approval."""
 
+        existing = self._store.get_by_idempotency_key(event.dedupe_key)
+        if existing is not None:
+            return existing
         run = DisruptionRun(event=event)
         self._store.save(run)
         try:
@@ -75,6 +78,11 @@ class DisruptionPipeline:
                 base_delay_seconds=self._settings.retry_base_delay_seconds,
             )
             coverage = inventory.current_stock / inventory.daily_consumption
+            affected_records = retry_integration_call(
+                lambda: self._sap.find_affected_records(event),
+                attempts=self._settings.retry_attempts,
+                base_delay_seconds=self._settings.retry_base_delay_seconds,
+            )
             run.audit_log.append(
                 AuditEntry(
                     agent="sap_s4hana",
@@ -87,9 +95,10 @@ class DisruptionPipeline:
                 )
             )
 
-            monitoring = self._monitoring.analyze(event, coverage)
+            monitoring = self._monitoring.analyze(event, coverage, affected_records)
             run.severity = monitoring.severity
             run.significant = monitoring.significant
+            run.affected_records = monitoring.affected_records
             run.chain_of_thought.append(monitoring.reasoning)
             run.audit_log.append(audit_for(monitoring, event.model_dump_json()))
             run.stages.append(

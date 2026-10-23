@@ -2,7 +2,13 @@
 
 from typing import Protocol
 
-from chainmind.core.models import DisruptionEvent, InventorySnapshot, PurchaseOrder, Vendor
+from chainmind.core.models import (
+    AffectedSupplyChainRecords,
+    DisruptionEvent,
+    InventorySnapshot,
+    PurchaseOrder,
+    Vendor,
+)
 
 
 class SAPClient(Protocol):
@@ -10,6 +16,9 @@ class SAPClient(Protocol):
 
     def get_inventory(self, component_id: str) -> InventorySnapshot:
         """Read the current inventory and production economics."""
+
+    def find_affected_records(self, event: DisruptionEvent) -> AffectedSupplyChainRecords:
+        """Find shipments and open purchase orders for a disrupted material."""
 
     def create_draft_purchase_order(self, order: PurchaseOrder) -> PurchaseOrder:
         """Create a non-executed draft purchase order."""

@@ -4,9 +4,11 @@
 
 ```mermaid
 flowchart TD
-    Ext[Weather / logistics alert] --> EB[Amazon EventBridge bus]
-    SAPEvents[SAP Event Mesh webhook] --> Sandbox[Local SAP sandbox in development]
-    Sandbox --> API
+    Ext[Weather / logistics alert] --> Poller[Scheduled source poller]
+    Poller --> EB[Amazon EventBridge bus]
+    SAPEvents[SAP Event Mesh webhook] --> Sandbox[Local SAP sandbox]
+    Sandbox -->|HMAC signed| Bridge[Event Mesh bridge]
+    Bridge --> EB
     UI[React + Vite dashboard] --> API[FastAPI]
     API --> Core[Framework-agnostic core pipeline]
     EB --> SF[AWS Step Functions]
@@ -27,7 +29,8 @@ flowchart TD
     LLM --> Bedrock[Amazon Bedrock Converse / Agents]
     Bedrock --> Actions[Lambda Action Groups]
     Actions --> Core
-    Core --> Store[(DynamoDB event store)]
+    Core --> Store[(SQLite event store)]
+    EB --> StoreAWS[(DynamoDB event store)]
     O --> Audit[(Private S3 audit / rationale artifacts)]
 ```
 
@@ -37,19 +40,24 @@ For local development the FastAPI route calls the same sequential pipeline used 
 
 | ChainMind stage | Core implementation | Local adapter | AWS / SAP mapping |
 | --- | --- | --- | --- |
-| Disruption ingress | `DisruptionEvent`, FastAPI route | Local HTTP API | API Gateway, EventBridge bus/rule |
-| 1. Monitoring | `MonitoringAgent` | JSON inventory snapshot | Monitoring Lambda; reads S/4HANA inventory |
+| Disruption ingress | Signed `event-bridge` route and normalized `DisruptionEvent` | HMAC-verified SAP Event Mesh simulator | API Gateway bridge Lambda, Secrets Manager, EventBridge bus/rule |
+| External polling | Weather/logistics client contracts and opt-in Open-Meteo adapter | Scripted offline feeds | Scheduled EventBridge rule and poller Lambda; external polling disabled by default |
+| 1. Monitoring | `MonitoringAgent` classifies four disruption types and evaluates significance | Seed inventory and shipment/open-PO records | Monitoring Lambda; reads S/4HANA inventory and shipment references |
 | 2. Logistics | `LogisticsAgent` | Seed stock and consumption | Logistics Lambda; estimates stockout days and line loss |
 | 3. Procurement | `ProcurementAgent` | Seed Ariba quotes | Procurement Lambda; SAP Ariba Network through SAP Integration Suite |
 | 4. Orchestration | `OrchestratorAgent`, `LLMClient` | Deterministic `MockLLMClient` | Four Bedrock Agents, aliases, Lambda action groups, and shared guardrail; model output explains but cannot change Python's selection |
 | Human approval | `DisruptionPipeline.decide` | FastAPI / dashboard | Step Functions callback token (API completion wiring remains a deployment TODO) |
 | PO execution | `SAPClient.execute_purchase_order` | Mock S/4HANA in-memory record | S/4HANA via SAP Integration Suite, only after approval |
-| Run/audit storage | `EventStore` | Thread-safe process memory | DynamoDB event table and private S3 rationale artifacts |
+| Run/audit storage | `RunStore` contract | SQLite snapshots and unique idempotency key (configurable, defaults to `data/chainmind-events.sqlite3`) | DynamoDB run records and event-key index; private S3 rationale artifacts |
 
 The separate local SAP sandbox (`sandbox/sap_sandbox/`) exposes OData-like S/4HANA material-stock
-and purchase-order routes, seeded Ariba vendors, an Event Mesh webhook simulator, and a Business
-Workflow approval callback simulator. It uses the same inventory and vendor seed fixtures as the
-application. These routes are local contract-test fixtures, not production SAP integrations.
+and purchase-order routes, seeded Ariba vendors, an HMAC-signed Event Mesh webhook simulator, and
+a Business Workflow approval callback simulator. Configure the same non-empty
+`CHAINMIND_EVENT_BRIDGE_SECRET` and `SAP_SANDBOX_EVENT_BRIDGE_SECRET` in the API and sandbox
+processes to use the local signed bridge. The external mock feeds cover weather, logistics delay,
+geopolitical disruption, and vendor failure. Open-Meteo is opt-in and only maps severe weather
+codes to an illustrative alert. These routes and adapters are local contract-test fixtures, not
+production SAP or external-source integrations.
 
 `RealS4HANAClient` and `RealAribaClient` use the Integration Suite HTTP abstraction with OAuth
 client-credentials tokens, cached tokens, CSRF-protected writes, typed response mapping, request
@@ -85,7 +93,8 @@ For the seed scenario, stock covers three days, delay is five days, and the conf
 - Integration calls retry only typed transient integration failures with bounded exponential backoff.
 - Every agent step and human decision appends a UTC audit entry with an input summary, output summary, and human-readable reasoning.
 - The orchestrator creates a draft; it never approves or executes one. The `approve` path alone invokes the SAP execution adapter. Rejection does not execute; revision creates a replacement draft that is still pending.
-- The local event store is process-memory only. DynamoDB and S3 constructs are defined for AWS, but production retention, task-token API completion, authorization, and Lambda dependency packaging still need implementation.
+- The local API persists run snapshots and idempotency keys in SQLite. DynamoDB stores AWS run and event-key records. Event bridge authenticity is enforced by a shared-secret HMAC, but production key rotation and replay windows need additional operational policy.
+- A duplicate idempotency key returns the first run instead of starting a second pipeline. SQLite uniqueness is locally enforced; production concurrent delivery and EventBridge retry behavior still require AWS integration testing.
 
 ## Resource-level IAM intent
 
@@ -94,5 +103,7 @@ For the seed scenario, stock covers three days, delay is five days, and the conf
 - Orchestrator Lambda: write access to `runs/*` in the private artifact bucket.
 - Step Functions: invoke permissions for only the four agent functions, approval callback, and post-approval executor.
 - EventBridge rule: starts the configured state machine.
+- Event bridge Lambda: reads only the dedicated HMAC secret and can publish only to the configured event bus.
+- Scheduled poller Lambda: can publish only to the configured event bus; network access for optional Open-Meteo remains a deployment configuration concern.
 
 The CDK app uses an encrypted, versioned S3 bucket with public access blocked, TLS enforced, and a DynamoDB table with on-demand capacity and point-in-time recovery. These defaults are a foundation, not a complete production security review.

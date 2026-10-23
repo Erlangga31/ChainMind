@@ -13,11 +13,18 @@ from pydantic import ValidationError
 
 from chainmind.core.config import Settings
 from chainmind.core.errors import IntegrationError
-from chainmind.core.models import DisruptionEvent, InventorySnapshot, PurchaseOrder, Vendor
+from chainmind.core.models import (
+    AffectedSupplyChainRecords,
+    DisruptionEvent,
+    InventorySnapshot,
+    PurchaseOrder,
+    Vendor,
+)
 from chainmind.integrations.sap.http import SAPCredentials, SAPHttpTransport
 
 MATERIAL_STOCK_PATH = "/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV/A_MaterialStock"
 PURCHASE_ORDER_PATH = "/sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrder"
+SCHEDULED_RECEIPT_PATH = "/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV/A_ScheduledReceipt"
 ARIBA_VENDOR_PATH = "/ariba/sourcing/vendors"
 
 
@@ -167,6 +174,31 @@ class RealS4HANAClient:
                 "SAP returned an inventory record for the wrong component.",
                 details={"component_id": component_id},
             ) from exc
+
+    def find_affected_records(self, event: DisruptionEvent) -> AffectedSupplyChainRecords:
+        """Match the disrupted material to scheduled receipts and open SAP orders."""
+
+        escaped_id = event.component_id.replace("'", "''")
+        receipt_payload = self._transport.request(
+            "GET",
+            SCHEDULED_RECEIPT_PATH,
+            params={"$filter": f"Material eq '{escaped_id}'"},
+        )
+        receipts = _odata_results(receipt_payload)
+        receipt_matches = [item for item in receipts if item.get("Material") == event.component_id]
+        shipment_ids = [
+            str(item["ShipmentId"]) for item in receipt_matches if item.get("ShipmentId")
+        ]
+        open_po_ids = {
+            str(item.get("PurchaseOrder") or item.get("po_id"))
+            for item in receipt_matches
+            if item.get("PurchaseOrder") or item.get("po_id")
+        }
+        return AffectedSupplyChainRecords(
+            component_id=event.component_id,
+            shipment_ids=shipment_ids,
+            open_purchase_order_ids=sorted(open_po_ids),
+        )
 
     def create_draft_purchase_order(self, order: PurchaseOrder) -> PurchaseOrder:
         """Create an OData draft using a fetched CSRF token."""

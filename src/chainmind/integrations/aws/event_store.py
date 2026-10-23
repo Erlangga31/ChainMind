@@ -1,8 +1,10 @@
 """DynamoDB-backed run store for AWS deployments."""
 
+from hashlib import sha256
 from uuid import UUID
 
 import boto3
+from boto3.dynamodb.conditions import Attr
 from botocore.exceptions import BotoCoreError, ClientError
 
 from chainmind.core.errors import IntegrationError
@@ -27,6 +29,14 @@ class DynamoDBEventStore(RunStore):
                     "run_data": run.model_dump_json(),
                 }
             )
+            self._table.put_item(
+                Item={
+                    "run_id": f"event#{sha256(run.event.dedupe_key.encode()).hexdigest()}",
+                    "created_at": run.created_at.isoformat(),
+                    "event_key": run.event.dedupe_key,
+                    "linked_run_id": str(run.run_id),
+                }
+            )
         except (BotoCoreError, ClientError) as exc:
             raise IntegrationError(
                 "The disruption run could not be saved to DynamoDB.",
@@ -45,18 +55,39 @@ class DynamoDBEventStore(RunStore):
             ) from exc
         return DisruptionRun.model_validate_json(item["run_data"]) if item else None
 
+    def get_by_idempotency_key(self, key: str) -> DisruptionRun | None:
+        """Resolve an idempotency index record to its stored run."""
+
+        try:
+            link = self._table.get_item(
+                Key={"run_id": f"event#{sha256(key.encode()).hexdigest()}"}
+            ).get("Item")
+            if not link:
+                return None
+            item = self._table.get_item(Key={"run_id": link["linked_run_id"]}).get("Item")
+        except (BotoCoreError, ClientError, KeyError) as exc:
+            raise IntegrationError(
+                "The event idempotency key could not be read from DynamoDB.",
+                details={"reason": str(exc)},
+            ) from exc
+        return DisruptionRun.model_validate_json(item["run_data"]) if item else None
+
     def list(self) -> list[DisruptionRun]:
         """Scan all local-demo runs; production should use a paginated query index."""
 
         runs: list[DisruptionRun] = []
         try:
-            response = self._table.scan(ProjectionExpression="run_id, created_at, run_data")
+            response = self._table.scan(
+                FilterExpression=Attr("run_data").exists(),
+                ProjectionExpression="run_id, created_at, run_data",
+            )
             runs.extend(
                 DisruptionRun.model_validate_json(item["run_data"])
                 for item in response.get("Items", [])
             )
             while "LastEvaluatedKey" in response:
                 response = self._table.scan(
+                    FilterExpression=Attr("run_data").exists(),
                     ProjectionExpression="run_id, created_at, run_data",
                     ExclusiveStartKey=response["LastEvaluatedKey"],
                 )

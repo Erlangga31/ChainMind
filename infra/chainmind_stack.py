@@ -33,6 +33,9 @@ from aws_cdk import (
     aws_s3 as s3,
 )
 from aws_cdk import (
+    aws_secretsmanager as secretsmanager,
+)
+from aws_cdk import (
     aws_stepfunctions as sfn,
 )
 from aws_cdk import (
@@ -169,6 +172,42 @@ class ChainMindStack(Stack):
         )
         event_store.grant_read_write_data(api_handler)
         artifacts.grant_put(api_handler, "runs/*")
+
+        bridge_secret = secretsmanager.Secret(
+            self,
+            "EventBridgeSharedSecret",
+            secret_name="chainmind/event-bridge",
+            description="HMAC shared secret for trusted Event Mesh event ingestion.",
+            generate_secret_string=secretsmanager.SecretStringGenerator(
+                password_length=48,
+                exclude_punctuation=True,
+            ),
+            removal_policy=RemovalPolicy.RETAIN,
+        )
+        event_bridge_handler = make_function(
+            "EventMeshBridge",
+            "chainmind.handlers.event_bridge.handler",
+            "Validate signed Event Mesh payloads and publish normalized events.",
+            environment={
+                "CHAINMIND_EVENT_BRIDGE_SECRET_SECRET_ID": bridge_secret.secret_arn,
+                "CHAINMIND_EVENT_BUS_NAME": "chainmind",
+            },
+        )
+        bridge_secret.grant_read(event_bridge_handler)
+        external_poll = make_function(
+            "ExternalDisruptionPoller",
+            "chainmind.handlers.external_poll.handler",
+            "Poll configured weather and logistics event sources on a schedule.",
+            environment={
+                "CHAINMIND_EVENT_BUS_NAME": "chainmind",
+                "CHAINMIND_EXTERNAL_POLL_ENABLED": str(
+                    self.node.try_get_context("externalPollEnabled") or "false"
+                ).lower(),
+                "CHAINMIND_EXTERNAL_WEATHER_ENABLED": str(
+                    self.node.try_get_context("externalWeatherEnabled") or "false"
+                ).lower(),
+            },
+        )
 
         # Phase 3 action-group Lambda calls the existing deterministic agent and SAP adapters.
         action_group_handler = make_function(
@@ -432,6 +471,13 @@ class ChainMindStack(Stack):
 
         # EventBridge receives external disruption events and starts the four-agent workflow.
         event_bus = events.EventBus(self, "ChainMindDisruptionBus", event_bus_name="chainmind")
+        for event_publisher in (event_bridge_handler, external_poll):
+            event_publisher.add_to_role_policy(
+                iam.PolicyStatement(
+                    actions=["events:PutEvents"],
+                    resources=[event_bus.event_bus_arn],
+                )
+            )
         events.Rule(
             self,
             "DisruptionEventRule",
@@ -449,6 +495,12 @@ class ChainMindStack(Stack):
                 )
             ],
         )
+        events.Rule(
+            self,
+            "ExternalDisruptionPollSchedule",
+            schedule=events.Schedule.rate(Duration.minutes(15)),
+            targets=[event_targets.LambdaFunction(external_poll)],
+        )
 
         # API Gateway forwards the documented API surface to the FastAPI Lambda.
         api = apigateway.RestApi(
@@ -464,6 +516,10 @@ class ChainMindStack(Stack):
         integration = apigateway.LambdaIntegration(api_handler)
         api.root.add_resource("health").add_method("GET", integration)
         api.root.add_resource("disruptions").add_method("POST", integration)
+        api.root.add_resource("event-bridge").add_method(
+            "POST",
+            apigateway.LambdaIntegration(event_bridge_handler),
+        )
         runs = api.root.add_resource("runs")
         runs.add_method("GET", integration)
         run = runs.add_resource("{run_id}")

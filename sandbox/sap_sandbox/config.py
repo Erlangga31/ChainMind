@@ -14,7 +14,8 @@ class SandboxSettings(BaseSettings):
         extra="ignore",
     )
 
-    event_webhook_url: str = "http://127.0.0.1:8000/disruptions"
+    event_webhook_url: str = "http://127.0.0.1:8000/event-bridge"
+    event_bridge_secret: str | None = None
     workflow_callback_url: str = "http://127.0.0.1:8000"
 
 

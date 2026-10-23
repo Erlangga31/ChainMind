@@ -32,6 +32,7 @@ from starlette.responses import Response
 from starlette.status import HTTP_400_BAD_REQUEST, HTTP_409_CONFLICT, HTTP_502_BAD_GATEWAY
 
 from chainmind.core.models import DisruptionEvent, PurchaseOrder, Vendor
+from chainmind.integrations.external.signing import SIGNATURE_HEADER, sign_payload
 
 ODATA_STOCK_PATH = "/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV/A_MaterialStock"
 ODATA_PO_PATH = "/sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrder"
@@ -136,11 +137,27 @@ def load_vendors() -> list[Vendor]:
     return [Vendor.model_validate(item) for item in json.loads(raw)]
 
 
-async def post_webhook(url: str, payload: dict[str, Any]) -> None:
-    """Deliver a simulator webhook and raise on non-success HTTP responses."""
+async def post_webhook(
+    url: str,
+    payload: dict[str, Any],
+    secret: str | None = None,
+    *,
+    require_signature: bool = False,
+) -> None:
+    """Deliver a simulator webhook and sign event messages when requested."""
 
+    if require_signature and not secret:
+        raise ValueError("SAP_SANDBOX_EVENT_BRIDGE_SECRET must be configured.")
+    headers = {"Content-Type": "application/json"}
+    body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    if secret:
+        headers[SIGNATURE_HEADER] = sign_payload(body, secret)
     async with httpx.AsyncClient(timeout=5.0) as client:
-        response = await client.post(url, json=payload)
+        response = await client.post(
+            url,
+            content=body,
+            headers=headers,
+        )
         response.raise_for_status()
 
 
@@ -342,6 +359,7 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
                     {
                         "Material": stock.Material,
                         "PurchaseOrder": "4500000001",
+                        "ShipmentId": "SHIP-MICROCHIP-X-001",
                         "ExpectedDate": (date.today() + timedelta(days=5)).isoformat(),
                         "Quantity": 1000,
                     }
@@ -482,8 +500,13 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
 
         webhook_url = sandbox_settings.event_webhook_url
         try:
-            await post_webhook(webhook_url, request.event.model_dump(mode="json"))
-        except httpx.HTTPError:
+            await post_webhook(
+                webhook_url,
+                request.event.model_dump(mode="json"),
+                sandbox_settings.event_bridge_secret,
+                require_signature=True,
+            )
+        except (httpx.HTTPError, ValueError):
             return JSONResponse(
                 status_code=HTTP_502_BAD_GATEWAY,
                 content={
@@ -525,18 +548,16 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
                 status_code=404,
                 content={"error": {"code": "scenario_not_found", "message": scenario_id}},
             )
-        event_data = {
-            key: value
-            for key, value in scenario.items()
-            if key not in {"scenario_id", "event_type"}
-        }
+        event_data = {key: value for key, value in scenario.items() if key != "scenario_id"}
         event = DisruptionEvent.model_validate(event_data)
         try:
             await post_webhook(
                 sandbox_settings.event_webhook_url,
                 event.model_dump(mode="json"),
+                sandbox_settings.event_bridge_secret,
+                require_signature=True,
             )
-        except httpx.HTTPError:
+        except (httpx.HTTPError, ValueError):
             return JSONResponse(
                 status_code=HTTP_502_BAD_GATEWAY,
                 content={

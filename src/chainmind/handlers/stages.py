@@ -35,8 +35,13 @@ def monitoring(event: dict[str, Any], context: object) -> dict[str, Any]:
         attempts=settings.retry_attempts,
         base_delay_seconds=settings.retry_base_delay_seconds,
     )
+    affected_records = retry_integration_call(
+        lambda: sap.find_affected_records(disruption),
+        attempts=settings.retry_attempts,
+        base_delay_seconds=settings.retry_base_delay_seconds,
+    )
     coverage = inventory.current_stock / inventory.daily_consumption
-    result = MonitoringAgent().analyze(disruption, coverage)
+    result = MonitoringAgent().analyze(disruption, coverage, affected_records)
     return {
         "result": result.model_dump(mode="json"),
         "inventory": inventory.model_dump(mode="json"),
