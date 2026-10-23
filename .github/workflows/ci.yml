@@ -94,7 +94,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install CDK dependencies
+      - name: Install ChainMind package and CDK dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Install infra requirements
         run: python -m pip install -r requirements.txt
         working-directory: infra
       - name: Synthesize CDK templates
