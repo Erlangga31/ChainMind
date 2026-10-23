@@ -16,9 +16,12 @@ from chainmind.core.errors import IntegrationError
 from chainmind.core.models import (
     AffectedSupplyChainRecords,
     DisruptionEvent,
+    InventoryProjection,
     InventorySnapshot,
     PurchaseOrder,
+    ShipmentTracking,
     Vendor,
+    VendorConfirmation,
 )
 from chainmind.integrations.sap.http import SAPCredentials, SAPHttpTransport
 
@@ -26,6 +29,8 @@ MATERIAL_STOCK_PATH = "/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV/A_MaterialStock
 PURCHASE_ORDER_PATH = "/sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrder"
 SCHEDULED_RECEIPT_PATH = "/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV/A_ScheduledReceipt"
 ARIBA_VENDOR_PATH = "/ariba/sourcing/vendors"
+ARIBA_PURCHASE_ORDER_PATH = "/ariba/po"
+INVENTORY_PROJECTION_PATH = "/sap/opu/odata/sap/Z_CHAINMIND_TRACKING_SRV/InventoryProjection"
 
 
 def load_sap_credentials(settings: Settings) -> tuple[str, SAPCredentials, str]:
@@ -231,6 +236,16 @@ class RealS4HANAClient:
         reference = entity.get("sap_reference") if isinstance(entity, dict) else None
         return str(reference or f"SAP-PO-{order.po_id}")
 
+    def record_inventory_projection(self, projection: InventoryProjection) -> None:
+        """Persist the illustrative future-stock snapshot through the custom SAP API."""
+
+        self._transport.request(
+            "POST",
+            INVENTORY_PROJECTION_PATH,
+            json_body=projection.model_dump(mode="json"),
+            csrf=True,
+        )
+
 
 class RealAribaClient:
     """Ariba vendor sourcing client using the Integration Suite transport."""
@@ -251,6 +266,59 @@ class RealAribaClient:
             return [Vendor.model_validate(item) for item in _odata_results(payload)]
         except ValidationError as exc:
             raise _map_error(exc, "vendor") from exc
+
+    def submit_purchase_order(self, order: PurchaseOrder) -> str:
+        """Submit an approved PO through the Integration Suite Ariba endpoint."""
+
+        response = self._transport.request(
+            "POST",
+            ARIBA_PURCHASE_ORDER_PATH,
+            json_body=order.model_dump(mode="json"),
+        )
+        entity = response.get("d", response)
+        reference = entity.get("ariba_reference") if isinstance(entity, dict) else None
+        if not reference:
+            raise IntegrationError("SAP Ariba did not return a purchase-order reference.")
+        return str(reference)
+
+    def get_vendor_confirmation(self, order: PurchaseOrder) -> VendorConfirmation:
+        """Read and validate the supplier confirmation for a submitted PO."""
+
+        response = self._transport.request(
+            "GET",
+            f"{ARIBA_PURCHASE_ORDER_PATH}/{quote(str(order.po_id), safe='')}/confirmation",
+        )
+        entity = response.get("d", response)
+        try:
+            return VendorConfirmation.model_validate(
+                {
+                    "confirmation_status": entity.get("confirmation_status"),
+                    "confirmed_quantity": entity.get("confirmed_quantity"),
+                    "note": entity.get("note", ""),
+                }
+            )
+        except ValidationError as exc:
+            raise _map_error(exc, "vendor confirmation") from exc
+
+    def get_shipment_tracking(self, order: PurchaseOrder) -> ShipmentTracking:
+        """Read and validate the supplier ASN and its current ETA."""
+
+        response = self._transport.request(
+            "GET",
+            f"{ARIBA_PURCHASE_ORDER_PATH}/{quote(str(order.po_id), safe='')}/asn",
+        )
+        entity = response.get("d", response)
+        try:
+            return ShipmentTracking.model_validate(
+                {
+                    "tracking_id": entity.get("tracking_id", entity.get("asn_id")),
+                    "status": entity.get("status"),
+                    "estimated_arrival": entity.get("estimated_arrival"),
+                    "note": entity.get("note", ""),
+                }
+            )
+        except ValidationError as exc:
+            raise _map_error(exc, "shipment tracking") from exc
 
 
 class SandboxWorkflowClient:

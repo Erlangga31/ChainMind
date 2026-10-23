@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum
 from uuid import UUID, uuid4
 
@@ -220,6 +220,74 @@ class PurchaseOrder(DomainModel):
     status: str = "PENDING_APPROVAL"
 
 
+class VendorConfirmation(DomainModel):
+    """Supplier confirmation returned after an approved order is submitted."""
+
+    confirmation_status: str
+    confirmed_quantity: int = Field(ge=0)
+    note: str = ""
+
+
+class ShipmentTracking(DomainModel):
+    """Vendor advance-shipment notice and estimated arrival."""
+
+    tracking_id: str
+    status: str
+    estimated_arrival: date
+    note: str = ""
+
+
+class InventoryProjection(DomainModel):
+    """Illustrative projected stock at the confirmed replenishment date."""
+
+    component_id: str
+    current_stock: int = Field(ge=0)
+    daily_consumption: int = Field(gt=0)
+    confirmed_receipt_quantity: int = Field(ge=0)
+    expected_arrival: date
+    projected_stock_at_arrival: int = Field(ge=0)
+    projected_coverage_days: float = Field(ge=0)
+    source: str = "ChainMind simulation"
+
+
+class ExecutionTracking(DomainModel):
+    """Post-approval execution, supplier, shipment, and projection result."""
+
+    sap_reference: str
+    ariba_reference: str
+    confirmation: VendorConfirmation
+    shipment: ShipmentTracking
+    inventory_projection: InventoryProjection
+    line_stoppage_avoided: bool
+    eta_deviation_days: float = Field(ge=0)
+    alert: str | None = None
+    simulated: bool = True
+
+
+class RunKPI(DomainModel):
+    """Per-run illustrative response economics, explicitly not a forecast."""
+
+    simulated: bool = True
+    cost_of_inaction: float = Field(ge=0)
+    action_cost: float = Field(ge=0)
+    illustrative_savings: float
+    line_stoppage_avoided: bool
+    estimated_stockout_days_avoided: float = Field(ge=0)
+
+
+class KPIReport(DomainModel):
+    """Aggregate illustrative KPIs for tracked disruption runs."""
+
+    simulated: bool = False
+    label: str = "Values are simulated or illustrative; not a financial forecast."
+    tracked_runs: int = Field(ge=0)
+    executed_runs: int = Field(ge=0)
+    line_stoppages_avoided: int = Field(ge=0)
+    illustrative_cost_of_inaction: float = Field(ge=0)
+    illustrative_action_cost: float = Field(ge=0)
+    illustrative_savings: float
+
+
 class DisruptionRun(DomainModel):
     """Persisted result of one disruption analysis."""
 
@@ -237,6 +305,9 @@ class DisruptionRun(DomainModel):
     chain_of_thought: list[str] = Field(default_factory=list)
     trace_steps: list[ReasoningTraceStep] = Field(default_factory=list)
     draft_po: PurchaseOrder | None = None
+    cost_of_inaction: float = Field(default=0, ge=0)
+    execution_tracking: ExecutionTracking | None = None
+    kpis: RunKPI | None = None
     workflow_task_id: str | None = None
     last_decision: DecisionRequest | None = None
     audit_log: list[AuditEntry] = Field(default_factory=list)

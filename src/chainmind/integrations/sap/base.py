@@ -5,9 +5,12 @@ from typing import Protocol
 from chainmind.core.models import (
     AffectedSupplyChainRecords,
     DisruptionEvent,
+    InventoryProjection,
     InventorySnapshot,
     PurchaseOrder,
+    ShipmentTracking,
     Vendor,
+    VendorConfirmation,
 )
 
 
@@ -26,12 +29,24 @@ class SAPClient(Protocol):
     def execute_purchase_order(self, order: PurchaseOrder) -> str:
         """Execute an order only after explicit human approval."""
 
+    def record_inventory_projection(self, projection: InventoryProjection) -> None:
+        """Store the projected replenishment snapshot for operational visibility."""
+
 
 class AribaClient(Protocol):
     """Operations against SAP Ariba Network."""
 
     def list_alternative_vendors(self, event: DisruptionEvent) -> list[Vendor]:
         """Return supplier quotes relevant to the disrupted component."""
+
+    def submit_purchase_order(self, order: PurchaseOrder) -> str:
+        """Send an approved purchase order to the selected supplier network."""
+
+    def get_vendor_confirmation(self, order: PurchaseOrder) -> VendorConfirmation:
+        """Retrieve the supplier's acknowledged order quantity and status."""
+
+    def get_shipment_tracking(self, order: PurchaseOrder) -> ShipmentTracking:
+        """Retrieve ASN and current estimated arrival details."""
 
 
 class ApprovalWorkflowClient(Protocol):

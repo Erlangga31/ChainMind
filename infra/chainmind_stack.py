@@ -180,6 +180,12 @@ class ChainMindStack(Stack):
             "chainmind.handlers.stages.execute_approved",
             "Execute a draft only after the explicit approval callback.",
         )
+        track_execution = make_function(
+            "TrackExecutedPurchaseOrder",
+            "chainmind.handlers.stages.track_execution",
+            "Reconcile Ariba confirmation, shipment ETA, and stock projection.",
+        )
+        event_store.grant_read_write_data(track_execution)
 
         # FastAPI transport. The role has only the run-table and artifact permissions it needs.
         api_handler = make_function(
@@ -497,8 +503,23 @@ class ChainMindStack(Stack):
             max_attempts=3,
         )
         execute_task.add_catch(failure_task, errors=["States.ALL"], result_path="$.error")
+        tracking_task = tasks.LambdaInvoke(
+            self,
+            "TrackSupplierExecution",
+            lambda_function=track_execution,
+            payload=sfn.TaskInput.from_json_path_at("$"),
+            payload_response_only=True,
+            result_path="$.tracking",
+        )
+        tracking_task.add_retry(
+            errors=["States.TaskFailed"],
+            interval=Duration.seconds(2),
+            backoff_rate=2,
+            max_attempts=3,
+        )
+        tracking_task.add_catch(failure_task, errors=["States.ALL"], result_path="$.error")
         completed = sfn.Succeed(self, "PurchaseOrderProcessed")
-        execute_success = execute_task.next(completed)
+        execute_success = execute_task.next(tracking_task).next(completed)
         rejected = sfn.Succeed(self, "PurchaseOrderRejected")
         revision_limit = sfn.Succeed(self, "RevisionLimitReached")
         invalid_decision = sfn.Fail(

@@ -7,6 +7,7 @@ from chainmind.core.errors import IntegrationError
 from chainmind.core.models import (
     AffectedSupplyChainRecords,
     DisruptionEvent,
+    InventoryProjection,
     InventorySnapshot,
     PurchaseOrder,
 )
@@ -19,6 +20,7 @@ class MockSAPS4HANAClient:
         self._inventory: dict[str, InventorySnapshot] = {}
         self._orders: dict[str, PurchaseOrder] = {}
         self._supply_chain_records: dict[str, dict[str, list[str]]] = {}
+        self._projections: dict[str, InventoryProjection] = {}
         self._load_inventory()
         raw_records = (
             files("chainmind.data")
@@ -88,3 +90,14 @@ class MockSAPS4HANAClient:
 
         order = self._orders.get(po_id)
         return order.model_copy(deep=True) if order else None
+
+    def record_inventory_projection(self, projection: InventoryProjection) -> None:
+        """Save an illustrative future stock projection without changing current stock."""
+
+        self._projections[projection.component_id] = projection.model_copy(deep=True)
+
+    def get_inventory_projection(self, component_id: str) -> InventoryProjection | None:
+        """Return a copy of the latest projected replenishment snapshot."""
+
+        projection = self._projections.get(component_id)
+        return projection.model_copy(deep=True) if projection else None

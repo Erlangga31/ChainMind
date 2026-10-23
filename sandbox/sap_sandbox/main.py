@@ -31,7 +31,7 @@ from sap_sandbox.models import (
 from starlette.responses import Response
 from starlette.status import HTTP_400_BAD_REQUEST, HTTP_409_CONFLICT, HTTP_502_BAD_GATEWAY
 
-from chainmind.core.models import DisruptionEvent, PurchaseOrder, Vendor
+from chainmind.core.models import DisruptionEvent, InventoryProjection, PurchaseOrder, Vendor
 from chainmind.integrations.external.signing import SIGNATURE_HEADER, sign_payload
 
 ODATA_STOCK_PATH = "/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV/A_MaterialStock"
@@ -73,6 +73,8 @@ class SandboxState:
     """In-memory records backing the local SAP sandbox."""
 
     orders: dict[str, PurchaseOrder] = field(default_factory=dict)
+    ariba_orders: dict[str, PurchaseOrder] = field(default_factory=dict)
+    inventory_projections: dict[str, InventoryProjection] = field(default_factory=dict)
     workflow_tasks: dict[str, WorkflowTask] = field(default_factory=dict)
     workflow_by_run: dict[str, str] = field(default_factory=dict)
     published_events: list[DisruptionEvent] = field(default_factory=list)
@@ -208,9 +210,14 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
                     status_code=401,
                     content={"error": "invalid_token"},
                 )
-        is_purchase_order = request.url.path.startswith(ODATA_PO_PATH)
+        csrf_protected = request.url.path.startswith(
+            (
+                ODATA_PO_PATH,
+                "/sap/opu/odata/sap/Z_CHAINMIND_TRACKING_SRV/InventoryProjection",
+            )
+        )
         method = request.method.upper()
-        if is_purchase_order and method in {"POST", "PATCH"}:
+        if csrf_protected and method in {"POST", "PATCH"}:
             supplied = request.headers.get("X-CSRF-Token", "")
             if not secrets.compare_digest(supplied, app.state.csrf_token):
                 return JSONResponse(
@@ -227,7 +234,7 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
                 )
         response = await call_next(request)
         if (
-            is_purchase_order
+            csrf_protected
             and method == "GET"
             and request.headers.get("X-CSRF-Token", "").lower() == "fetch"
         ):
@@ -429,6 +436,40 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
             order.sap_reference = f"MOCK-PO-{order.po_id.hex[:8].upper()}"
         return {"d": order.model_dump(mode="json")}
 
+    @app.post("/sap/opu/odata/sap/Z_CHAINMIND_TRACKING_SRV/InventoryProjection")
+    def save_inventory_projection(projection: InventoryProjection) -> dict[str, Any]:
+        """Store the non-authoritative projected stock snapshot."""
+
+        state.inventory_projections[projection.component_id] = projection
+        return {"d": projection.model_dump(mode="json")}
+
+    @app.get(
+        "/sap/opu/odata/sap/Z_CHAINMIND_TRACKING_SRV/InventoryProjection",
+        response_model=None,
+    )
+    def list_inventory_projections() -> dict[str, Any]:
+        """Provide the collection read used to fetch CSRF tokens before writes."""
+
+        return {
+            "d": {
+                "results": [
+                    item.model_dump(mode="json") for item in state.inventory_projections.values()
+                ]
+            }
+        }
+
+    @app.get(
+        "/sap/opu/odata/sap/Z_CHAINMIND_TRACKING_SRV/InventoryProjection/{component_id}",
+        response_model=None,
+    )
+    def get_inventory_projection(component_id: str) -> dict[str, Any] | JSONResponse:
+        """Return a stored illustrative inventory projection."""
+
+        projection = state.inventory_projections.get(component_id)
+        if projection is None:
+            return odata_error("404", "Inventory projection was not found.", 404)
+        return {"d": projection.model_dump(mode="json")}
+
     @app.get("/ariba/sourcing/vendors", response_model=None)
     def list_ariba_vendors(
         filter_expression: str | None = Query(default=None, alias="$filter"),
@@ -470,26 +511,44 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
             }
         }
 
-    @app.get("/ariba/po/{po_id}/confirmation")
-    def get_vendor_confirmation(po_id: str) -> dict[str, Any]:
-        """Return a stable simulated supplier confirmation."""
+    @app.post("/ariba/po", response_model=None)
+    def submit_ariba_purchase_order(order: PurchaseOrder) -> dict[str, Any] | JSONResponse:
+        """Register an approved purchase order in the simulated supplier network."""
 
+        key = str(order.po_id)
+        state.ariba_orders.setdefault(key, order.model_copy(deep=True))
+        return {"ariba_reference": f"MOCK-ARIBA-{order.po_id.hex[:8].upper()}"}
+
+    @app.get("/ariba/po/{po_id}/confirmation", response_model=None)
+    def get_vendor_confirmation(po_id: str) -> dict[str, Any] | JSONResponse:
+        """Return a supplier confirmation only for a registered purchase order."""
+
+        order = state.ariba_orders.get(po_id)
+        if order is None:
+            return odata_error("404", "Ariba purchase order was not found.", 404)
         return {
             "purchase_order_id": po_id,
             "confirmation_status": "CONFIRMED",
-            "confirmed_quantity": stock.PurchaseQuantity,
+            "confirmed_quantity": order.quantity,
             "note": "Simulated supplier confirmation.",
         }
 
-    @app.get("/ariba/po/{po_id}/asn")
-    def get_advance_ship_notice(po_id: str) -> dict[str, Any]:
-        """Return a simulated advance ship notice and estimated arrival."""
+    @app.get("/ariba/po/{po_id}/asn", response_model=None)
+    def get_advance_ship_notice(po_id: str) -> dict[str, Any] | JSONResponse:
+        """Return an ASN using the lead time of the submitted PO's chosen vendor."""
+
+        order = state.ariba_orders.get(po_id)
+        if order is None:
+            return odata_error("404", "Ariba purchase order was not found.", 404)
+        vendor = next((item for item in vendors if item.vendor_id == order.vendor_id), None)
+        if vendor is None:
+            return odata_error("404", "The PO's supplier was not found.", 404)
 
         return {
             "purchase_order_id": po_id,
             "asn_id": f"ASN-{po_id[:8].upper()}",
             "status": "IN_TRANSIT",
-            "estimated_arrival": (date.today() + timedelta(days=2)).isoformat(),
+            "estimated_arrival": (date.today() + timedelta(days=vendor.lead_time_days)).isoformat(),
             "note": "Simulated advance ship notice.",
         }
 

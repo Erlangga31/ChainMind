@@ -22,8 +22,14 @@ flowchart TD
     Human -->|revise| O
     Human -->|reject| Rejected[Rejected; no SAP execution]
     Human -->|approve| Execute[Approved / execute PO]
+    Execute --> Track[Ariba supplier confirmation + ASN / ETA]
+    Track --> Projection[S/4HANA illustrative inventory projection]
+    Projection --> KPIs[Per-run and aggregate illustrative KPIs]
+    KPIs --> Done[Tracking complete]
     Core --> SAP[(SAP S/4HANA)]
     P --> Ariba[(SAP Ariba Network)]
+    Track --> Ariba
+    Projection --> SAP
     O --> LLM[LLMClient]
     LLM --> MockLLM[MockLLMClient default]
     LLM --> Bedrock[Amazon Bedrock Converse / Agents]
@@ -34,7 +40,7 @@ flowchart TD
     O --> Audit[(Private S3 audit / rationale artifacts)]
 ```
 
-For local development the FastAPI route calls the same sequential pipeline used by the CLI and does not contact AWS. The stack definition models the AWS event-driven path separately. Each run presents six timeline entries in the dashboard: monitoring, logistics, procurement, orchestrator, human approval, and PO execution. The first four are agent stages; the last two enforce the human gate.
+For local development the FastAPI route calls the same sequential pipeline used by the CLI and does not contact AWS. The stack definition models the AWS event-driven path separately. Each run presents seven timeline entries in the dashboard: monitoring, logistics, procurement, orchestrator, human approval, PO execution, and supplier execution/tracking. The first four are agent stages; the approval gate precedes execution and tracking.
 
 ## Stage responsibilities and service mapping
 
@@ -48,11 +54,15 @@ For local development the FastAPI route calls the same sequential pipeline used 
 | 4. Orchestration | `OrchestratorAgent`, `LLMClient` | Deterministic `MockLLMClient` | Four Bedrock Agents, aliases, Lambda action groups, and shared guardrail; model output explains but cannot change Python's selection |
 | Human approval | Shared transition definition, bounded revision count, approver-role check | FastAPI role header for demo only | Step Functions task token; API sends success/failure callbacks, rejection is caught as a non-execution terminal path |
 | PO execution | `SAPClient.execute_purchase_order` | Mock S/4HANA in-memory record | S/4HANA via SAP Integration Suite, only after approval |
+| Execution and tracking | `TrackingAgent`, typed confirmation/ASN/projection/KPI models | Ariba sandbox confirms the submitted PO and returns a vendor-specific ETA; projection is separate from current stock | Tracking Lambda after execution; Ariba confirmation/ASN; custom S/4HANA projection API |
+| KPI reporting | `RunKPI`, aggregate `GET /kpis` | Values marked simulated/illustrative | DynamoDB-backed run aggregation; not a financial forecast |
 | Run/audit storage | `RunStore` contract | SQLite snapshots and unique idempotency key (configurable, defaults to `data/chainmind-events.sqlite3`) | DynamoDB run records and event-key index; private S3 rationale artifacts |
 
 The separate local SAP sandbox (`sandbox/sap_sandbox/`) exposes OData-like S/4HANA material-stock
 and purchase-order routes, seeded Ariba vendors, an HMAC-signed Event Mesh webhook simulator, and
-a Business Workflow approval callback simulator. Configure the same non-empty
+a Business Workflow approval callback simulator. It also requires an Ariba PO submission before
+returning supplier confirmation or ASN data, and stores projected stock separately from current
+inventory. Configure the same non-empty
 `CHAINMIND_EVENT_BRIDGE_SECRET` and `SAP_SANDBOX_EVENT_BRIDGE_SECRET` in the API and sandbox
 processes to use the local signed bridge. The external mock feeds cover weather, logistics delay,
 geopolitical disruption, and vendor failure. Open-Meteo is opt-in and only maps severe weather
@@ -85,6 +95,11 @@ only; deployment and runtime behavior require an AWS account with model access.
 - The orchestrator chooses the feasible vendor with the lowest action cost plus residual loss; equal totals prefer the lower risk score.
 
 For the seed scenario, stock covers three days, delay is five days, and the configured inaction estimate is $200,000. Vendor B arrives in two days. It costs $135,000 and has no reserve-adjusted stockout exposure, while the cheaper but slower/less reliable alternatives have greater residual loss. Its 5,000-piece draft is $27 per piece and remains pending approval.
+
+After approval, the tracking stage records the Ariba confirmation and vendor-specific ASN ETA,
+then calculates projected stock at arrival without overwriting the SAP current-stock snapshot.
+Per-run `cost_of_inaction`, action cost, and savings are labeled simulated/illustrative and do not
+represent a financial forecast. `GET /kpis` aggregates only runs with completed tracking.
 
 ## Trust boundary and failure behavior
 

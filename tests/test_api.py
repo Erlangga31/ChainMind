@@ -62,6 +62,34 @@ def test_validation_and_health_responses_are_structured() -> None:
     assert response.json()["code"] == "validation_error"
 
 
+def test_kpis_include_only_completed_tracking_and_are_labeled_illustrative() -> None:
+    created = client.post(
+        "/disruptions",
+        json={
+            "title": "Supplier shipment delay",
+            "description": "Extreme weather delayed the component shipment.",
+            "delay_days": 5,
+        },
+    )
+    run_id = created.json()["run_id"]
+    pending = client.get("/kpis").json()
+    assert pending["simulated"] is True
+    assert "illustrative" in pending["label"].lower()
+
+    approved = client.post(
+        f"/runs/{run_id}/decision",
+        json={"decision": "approve"},
+        headers={"X-ChainMind-Role": "approver"},
+    )
+    assert approved.status_code == 200
+    report = client.get("/kpis")
+
+    assert report.status_code == 200
+    assert report.json()["tracked_runs"] >= pending["tracked_runs"] + 1
+    assert report.json()["executed_runs"] >= pending["executed_runs"] + 1
+    assert report.json()["line_stoppages_avoided"] >= 1
+
+
 def test_dashboard_loopback_origin_is_allowed_by_cors() -> None:
     response = client.options(
         "/disruptions",

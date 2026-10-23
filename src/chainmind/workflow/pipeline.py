@@ -7,6 +7,7 @@ from chainmind.agents.logistics import LogisticsAgent
 from chainmind.agents.monitoring import MonitoringAgent
 from chainmind.agents.orchestrator import OrchestratorAgent
 from chainmind.agents.procurement import ProcurementAgent
+from chainmind.agents.tracking import TrackingAgent
 from chainmind.core.audit import audit_for
 from chainmind.core.config import Settings
 from chainmind.core.errors import ChainMindError
@@ -54,6 +55,7 @@ class DisruptionPipeline:
         self._logistics = LogisticsAgent()
         self._procurement = ProcurementAgent(ariba, settings)
         self._orchestrator = OrchestratorAgent(llm)
+        self._tracking = TrackingAgent()
         self._run_context: dict[
             UUID, tuple[InventorySnapshot, LogisticsResult, ProcurementResult]
         ] = {}
@@ -118,6 +120,7 @@ class DisruptionPipeline:
 
             self._transition(run, WorkflowState.LOGISTICS)
             logistics = self._logistics.analyze(event, inventory)
+            run.cost_of_inaction = logistics.cost_of_inaction
             run.chain_of_thought.append(logistics.reasoning)
             run.audit_log.append(
                 audit_for(
@@ -234,6 +237,13 @@ class DisruptionPipeline:
                     summary="No PO has been executed.",
                 )
             )
+            run.stages.append(
+                StageResult(
+                    name="Execution & tracking",
+                    status="WAITING_FOR_APPROVAL",
+                    summary="Supplier confirmation and shipment tracking start after approval.",
+                )
+            )
             run.status = RunStatus.PENDING_APPROVAL
             self._transition(run, WorkflowState.HUMAN_APPROVAL)
             self._run_context[run.run_id] = (inventory, logistics, procurement)
@@ -274,6 +284,12 @@ class DisruptionPipeline:
 
         run = self.get_run(run_id)
         if run.last_decision == decision and run.status != RunStatus.PENDING_APPROVAL:
+            if (
+                run.status == RunStatus.APPROVED
+                and decision.decision == DecisionType.APPROVE
+                and run.execution_tracking is None
+            ):
+                return self._finish_tracking(run)
             return DecisionResult(
                 run_id=run.run_id,
                 status=run.status,
@@ -338,9 +354,8 @@ class DisruptionPipeline:
             attempts=self._settings.retry_attempts,
             base_delay_seconds=self._settings.retry_base_delay_seconds,
         )
-        run.status = RunStatus.EXECUTED
-        self._transition(run, WorkflowState.COMPLETED)
-        run.draft_po.status = "EXECUTED"
+        run.status = RunStatus.APPROVED
+        run.draft_po.status = "APPROVED"
         run.draft_po.sap_reference = sap_reference
         run.last_decision = decision.model_copy(deep=True)
         run.audit_log.append(
@@ -352,12 +367,150 @@ class DisruptionPipeline:
             )
         )
         self._complete_decision(run, "Human approval", "APPROVED", "PO execution", "EXECUTED")
+        for stage in run.stages:
+            if stage.name == "Execution & tracking":
+                stage.status = "IN_PROGRESS"
+                stage.summary = (
+                    "SAP execution completed; waiting for supplier confirmation and ASN."
+                )
+        run.updated_at = datetime.now(UTC)
+        self._store.save(run)
+        return self._finish_tracking(run)
+
+    def _finish_tracking(self, run: DisruptionRun) -> DecisionResult:
+        """Submit the approved PO to Ariba and persist its tracking outcome."""
+
+        if run.draft_po is None or run.draft_po.sap_reference is None:
+            raise ChainMindError(
+                "executed_order_unavailable",
+                "Tracking requires a purchase order already executed in SAP.",
+                status_code=409,
+            )
+        try:
+            context = self._run_context.get(run.run_id)
+            inventory = (
+                context[0]
+                if context is not None
+                else retry_integration_call(
+                    lambda: self._sap.get_inventory(run.event.component_id),
+                    attempts=self._settings.retry_attempts,
+                    base_delay_seconds=self._settings.retry_base_delay_seconds,
+                )
+            )
+            vendor = next(
+                (
+                    item.vendor
+                    for item in run.vendor_comparison
+                    if item.vendor.vendor_id == run.draft_po.vendor_id
+                ),
+                None,
+            )
+            if vendor is None:
+                raise ChainMindError(
+                    "tracking_vendor_unavailable",
+                    "The selected vendor quote is not available for tracking.",
+                    status_code=409,
+                    details={"vendor_id": run.draft_po.vendor_id},
+                )
+            ariba_reference = retry_integration_call(
+                lambda: self._ariba.submit_purchase_order(run.draft_po),
+                attempts=self._settings.retry_attempts,
+                base_delay_seconds=self._settings.retry_base_delay_seconds,
+            )
+            confirmation = retry_integration_call(
+                lambda: self._ariba.get_vendor_confirmation(run.draft_po),
+                attempts=self._settings.retry_attempts,
+                base_delay_seconds=self._settings.retry_base_delay_seconds,
+            )
+            shipment = retry_integration_call(
+                lambda: self._ariba.get_shipment_tracking(run.draft_po),
+                attempts=self._settings.retry_attempts,
+                base_delay_seconds=self._settings.retry_base_delay_seconds,
+            )
+            tracking, kpis = self._tracking.analyze(
+                sap_reference=run.draft_po.sap_reference,
+                ariba_reference=ariba_reference,
+                order=run.draft_po,
+                vendor=vendor,
+                inventory=inventory,
+                confirmation=confirmation,
+                shipment=shipment,
+                cost_of_inaction=run.cost_of_inaction,
+                estimated_stockout_days=max(
+                    run.event.delay_days - inventory.current_stock / inventory.daily_consumption,
+                    0,
+                ),
+                simulated=not (
+                    self._settings.mode == "aws" and self._settings.resolved_sap_backend == "real"
+                ),
+            )
+            self._sap.record_inventory_projection(tracking.inventory_projection)
+        except ChainMindError as exc:
+            run.audit_log.append(
+                AuditEntry(
+                    agent="execution_tracking",
+                    input_summary=f"run_id={run.run_id}; po_id={run.draft_po.po_id}",
+                    output_summary=f"Supplier tracking did not complete: {exc.code}.",
+                    reasoning=exc.message,
+                )
+            )
+            run.updated_at = datetime.now(UTC)
+            self._store.save(run)
+            raise
+
+        run.execution_tracking = tracking
+        run.kpis = kpis
+        run.draft_po.status = "EXECUTED"
+        run.status = RunStatus.EXECUTED
+        self._transition(run, WorkflowState.COMPLETED)
+        tracking_summary = (
+            f"Ariba confirmed {confirmation.confirmed_quantity:,} units; "
+            f"ETA {shipment.estimated_arrival.isoformat()}; projected stock "
+            f"{tracking.inventory_projection.projected_stock_at_arrival:,} units."
+        )
+        for stage in run.stages:
+            if stage.name == "Execution & tracking":
+                stage.status = "COMPLETED"
+                stage.summary = tracking_summary
+        run.audit_log.append(
+            AuditEntry(
+                agent="execution_tracking",
+                input_summary=(
+                    f"SAP PO={tracking.sap_reference}; Ariba PO={tracking.ariba_reference}"
+                ),
+                output_summary=tracking_summary,
+                reasoning=(
+                    "Supplier confirmation, advance shipment notice, and future stock "
+                    "projection were reconciled after explicit approval."
+                ),
+            )
+        )
+        if tracking.alert:
+            run.audit_log.append(
+                AuditEntry(
+                    agent="execution_tracking",
+                    input_summary=f"tracking_id={shipment.tracking_id}",
+                    output_summary=tracking.alert,
+                    reasoning="The reported ETA exceeds the selected vendor's quoted lead time.",
+                )
+            )
+        run.chain_of_thought.append(
+            f"[SAP Ariba] Supplier confirmed the PO; ASN {shipment.tracking_id} "
+            f"estimates arrival {shipment.estimated_arrival.isoformat()}."
+        )
+        run.chain_of_thought.append(
+            f"[SAP S/4HANA] Projected {tracking.inventory_projection.projected_coverage_days:g} "
+            "coverage days after receipt; values are illustrative."
+        )
         run.updated_at = datetime.now(UTC)
         self._store.save(run)
         return DecisionResult(
             run_id=run.run_id,
             status=run.status,
-            message=f"Purchase order approved and executed as {sap_reference}.",
+            message=(
+                f"Purchase order executed as {tracking.sap_reference}; "
+                "supplier tracking is complete."
+            ),
             draft_po=run.draft_po,
         )
 
@@ -438,7 +591,9 @@ class DisruptionPipeline:
             )
         )
         run.stages = [
-            stage for stage in run.stages if stage.name not in {"Human approval", "PO execution"}
+            stage
+            for stage in run.stages
+            if stage.name not in {"Human approval", "PO execution", "Execution & tracking"}
         ]
         run.stages.extend(
             [
@@ -451,6 +606,11 @@ class DisruptionPipeline:
                     name="PO execution",
                     status="WAITING_FOR_APPROVAL",
                     summary="Revised PO has not been executed.",
+                ),
+                StageResult(
+                    name="Execution & tracking",
+                    status="WAITING_FOR_APPROVAL",
+                    summary="Supplier confirmation and shipment tracking start after approval.",
                 ),
             ]
         )
@@ -494,11 +654,21 @@ class DisruptionPipeline:
                     if execution_status == "EXECUTED" and run.draft_po
                     else "Purchase order was not executed."
                 )
+            elif stage.name == "Execution & tracking" and execution_status == "NOT_EXECUTED":
+                stage.status = "NOT_EXECUTED"
+                stage.summary = "Supplier execution and shipment tracking were not started."
         run.updated_at = datetime.now(UTC)
 
     @staticmethod
     def _skip_remaining_stages(run: DisruptionRun) -> None:
-        for name in ("Logistics", "Procurement", "Orchestrator", "Human approval", "PO execution"):
+        for name in (
+            "Logistics",
+            "Procurement",
+            "Orchestrator",
+            "Human approval",
+            "PO execution",
+            "Execution & tracking",
+        ):
             run.stages.append(
                 StageResult(name=name, status="SKIPPED", summary="Disruption was not significant.")
             )

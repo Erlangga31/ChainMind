@@ -1,5 +1,6 @@
 """Local HTTP contract tests for authenticated SAP integration clients."""
 
+from datetime import date
 from uuid import uuid4
 
 import httpx
@@ -7,7 +8,12 @@ import pytest
 
 from chainmind.core.config import Settings
 from chainmind.core.errors import IntegrationError
-from chainmind.core.models import DecisionRequest, DisruptionEvent, PurchaseOrder
+from chainmind.core.models import (
+    DecisionRequest,
+    DisruptionEvent,
+    InventoryProjection,
+    PurchaseOrder,
+)
 from chainmind.factory import create_pipeline
 from chainmind.integrations.sap.http import SAPCredentials, SAPHttpTransport
 from chainmind.integrations.sap.real_clients import (
@@ -82,6 +88,21 @@ def test_ariba_client_maps_vendor_records_from_the_sandbox(sap_sandbox_url: str)
 
     assert len(vendors) == 4
     assert next(vendor for vendor in vendors if vendor.vendor_id == "vendor-b").total_cost == 135000
+    order = PurchaseOrder(
+        vendor_id="vendor-b",
+        vendor_name="Vendor B",
+        component_id="microchip-x",
+        component_name="Microchip X",
+        quantity=5000,
+        unit_price=27,
+        total_price=135000,
+    )
+    reference = client.submit_purchase_order(order)
+    confirmation = client.get_vendor_confirmation(order)
+    shipment = client.get_shipment_tracking(order)
+    assert reference.startswith("MOCK-ARIBA-")
+    assert confirmation.confirmed_quantity == 5000
+    assert shipment.tracking_id.startswith("ASN-")
     transport.close()
 
 
@@ -140,9 +161,45 @@ def test_pipeline_runs_through_sandbox_and_keeps_approval_workflow_consistent(
     ).json()
 
     assert result.status.value == "EXECUTED"
+    completed = pipeline.get_run(run.run_id)
+    assert completed.execution_tracking is not None
+    assert completed.execution_tracking.confirmation.confirmed_quantity == 5000
+    assert completed.execution_tracking.shipment.estimated_arrival
+    assert completed.kpis is not None
+    assert completed.stages[-1].name == "Execution & tracking"
+    assert completed.stages[-1].status == "COMPLETED"
     assert duplicate.message == "This decision was already recorded."
     assert workflow_task["status"] == "APPROVED"
     assert workflow_task["decision"] == "approve"
+
+
+def test_sap_sandbox_persists_inventory_projection(sap_sandbox_url: str) -> None:
+    transport = SAPHttpTransport(
+        base_url=sap_sandbox_url,
+        token_url=f"{sap_sandbox_url}/oauth/token",
+        credentials=SAPCredentials("local-contract-client", "local-contract-secret"),
+        timeout_seconds=2,
+        retry_base_delay_seconds=0,
+    )
+    client = RealS4HANAClient(transport)
+    projection = InventoryProjection(
+        component_id="microchip-x",
+        current_stock=3000,
+        daily_consumption=1000,
+        confirmed_receipt_quantity=5000,
+        expected_arrival=date.today(),
+        projected_stock_at_arrival=6000,
+        projected_coverage_days=6,
+    )
+
+    client.record_inventory_projection(projection)
+
+    saved = transport.request(
+        "GET",
+        "/sap/opu/odata/sap/Z_CHAINMIND_TRACKING_SRV/InventoryProjection/microchip-x",
+    )
+    assert saved["d"]["projected_stock_at_arrival"] == 6000
+    transport.close()
 
 
 def test_oauth_transport_does_not_retry_client_errors(sap_sandbox_url: str) -> None:

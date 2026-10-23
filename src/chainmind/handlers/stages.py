@@ -11,6 +11,7 @@ from chainmind.agents.logistics import LogisticsAgent
 from chainmind.agents.monitoring import MonitoringAgent
 from chainmind.agents.orchestrator import OrchestratorAgent
 from chainmind.agents.procurement import ProcurementAgent
+from chainmind.agents.tracking import TrackingAgent
 from chainmind.core.config import Settings
 from chainmind.core.errors import IntegrationError
 from chainmind.core.models import (
@@ -165,10 +166,10 @@ def execute_approved(event: dict[str, Any], context: object) -> dict[str, str]:
         store = DynamoDBEventStore(settings.event_table_name, settings.aws_region)
         run = store.get(run_id)
         if run is not None:
-            run.status = RunStatus.EXECUTED
-            run.workflow_state = WorkflowState.COMPLETED
+            run.status = RunStatus.APPROVED
+            run.workflow_state = WorkflowState.EXECUTION
             if run.draft_po is not None:
-                run.draft_po.status = "EXECUTED"
+                run.draft_po.status = "APPROVED"
                 run.draft_po.sap_reference = reference
             for stage in run.stages:
                 if stage.name == "PO execution":
@@ -184,3 +185,128 @@ def execute_approved(event: dict[str, Any], context: object) -> dict[str, str]:
             )
             store.save(run)
     return {"status": "EXECUTED", "sap_reference": reference}
+
+
+def track_execution(event: dict[str, Any], context: object) -> dict[str, Any]:
+    """Reconcile supplier confirmation, ASN, stock projection, and illustrative KPIs."""
+
+    del context
+    if event.get("execution", {}).get("status") != "EXECUTED":
+        return {"status": "NOT_TRACKED"}
+    disruption = DisruptionEvent.model_validate(event["event"])
+    inventory = InventorySnapshot.model_validate(event["monitoring"]["inventory"])
+    logistics_result = LogisticsResult.model_validate(event["logistics"])
+    settings = Settings()
+    sap, ariba = create_sap_clients(settings)
+    store = DynamoDBEventStore(settings.event_table_name, settings.aws_region)
+    run = store.get(disruption.event_id)
+    if run is None or run.draft_po is None:
+        raise IntegrationError(
+            "The executed purchase order has no persisted run to track.",
+            details={"run_id": str(disruption.event_id)},
+        )
+    if run.execution_tracking is not None:
+        return {
+            "status": "TRACKED",
+            "tracking": run.execution_tracking.model_dump(mode="json"),
+        }
+    for stage in run.stages:
+        if stage.name == "Execution & tracking":
+            stage.status = "IN_PROGRESS"
+            stage.summary = "SAP execution completed; reconciling supplier confirmation and ASN."
+    store.save(run)
+    vendor = next(
+        (
+            item.vendor
+            for item in run.vendor_comparison
+            if item.vendor.vendor_id == run.draft_po.vendor_id
+        ),
+        None,
+    )
+    if vendor is None:
+        raise IntegrationError(
+            "The selected vendor quote is unavailable for execution tracking.",
+            details={"vendor_id": run.draft_po.vendor_id},
+        )
+    ariba_reference = retry_integration_call(
+        lambda: ariba.submit_purchase_order(run.draft_po),
+        attempts=settings.retry_attempts,
+        base_delay_seconds=settings.retry_base_delay_seconds,
+    )
+    confirmation = retry_integration_call(
+        lambda: ariba.get_vendor_confirmation(run.draft_po),
+        attempts=settings.retry_attempts,
+        base_delay_seconds=settings.retry_base_delay_seconds,
+    )
+    shipment = retry_integration_call(
+        lambda: ariba.get_shipment_tracking(run.draft_po),
+        attempts=settings.retry_attempts,
+        base_delay_seconds=settings.retry_base_delay_seconds,
+    )
+    sap_reference = run.draft_po.sap_reference or event["execution"]["sap_reference"]
+    tracking, kpis = TrackingAgent().analyze(
+        sap_reference=sap_reference,
+        ariba_reference=ariba_reference,
+        order=run.draft_po,
+        vendor=vendor,
+        inventory=inventory,
+        confirmation=confirmation,
+        shipment=shipment,
+        cost_of_inaction=logistics_result.cost_of_inaction,
+        estimated_stockout_days=logistics_result.stockout_days,
+        simulated=not (settings.mode == "aws" and settings.resolved_sap_backend == "real"),
+    )
+    retry_integration_call(
+        lambda: sap.record_inventory_projection(tracking.inventory_projection),
+        attempts=settings.retry_attempts,
+        base_delay_seconds=settings.retry_base_delay_seconds,
+    )
+    run.execution_tracking = tracking
+    run.kpis = kpis
+    run.status = RunStatus.EXECUTED
+    run.workflow_state = WorkflowState.COMPLETED
+    run.draft_po.status = "EXECUTED"
+    summary = (
+        f"Ariba confirmed {confirmation.confirmed_quantity:,} units; "
+        f"ETA {shipment.estimated_arrival.isoformat()}; projected stock "
+        f"{tracking.inventory_projection.projected_stock_at_arrival:,} units."
+    )
+    for stage in run.stages:
+        if stage.name == "Execution & tracking":
+            stage.status = "COMPLETED"
+            stage.summary = summary
+    run.audit_log.append(
+        AuditEntry(
+            agent="execution_tracking",
+            input_summary=f"SAP PO={sap_reference}; Ariba PO={ariba_reference}",
+            output_summary=summary,
+            reasoning=(
+                "Supplier confirmation, advance shipment notice, and future stock "
+                "projection were reconciled after explicit approval."
+            ),
+        )
+    )
+    if tracking.alert:
+        run.audit_log.append(
+            AuditEntry(
+                agent="execution_tracking",
+                input_summary=f"tracking_id={shipment.tracking_id}",
+                output_summary=tracking.alert,
+                reasoning="The reported ETA exceeds the selected vendor's quoted lead time.",
+            )
+        )
+    run.chain_of_thought.extend(
+        [
+            f"[SAP Ariba] Supplier confirmed the PO; ASN {shipment.tracking_id} "
+            f"estimates arrival {shipment.estimated_arrival.isoformat()}.",
+            f"[SAP S/4HANA] Projected "
+            f"{tracking.inventory_projection.projected_coverage_days:g} coverage days "
+            "after receipt; values are illustrative.",
+        ]
+    )
+    store.save(run)
+    return {
+        "status": "TRACKED",
+        "tracking": tracking.model_dump(mode="json"),
+        "kpis": kpis.model_dump(mode="json"),
+    }

@@ -62,7 +62,50 @@ export interface DisruptionRun {
   selected_vendor_id: string | null;
   chain_of_thought: string[];
   draft_po: PurchaseOrder | null;
+  execution_tracking: {
+    sap_reference: string;
+    ariba_reference: string;
+    confirmation: {
+      confirmation_status: string;
+      confirmed_quantity: number;
+      note: string;
+    };
+    shipment: {
+      tracking_id: string;
+      status: string;
+      estimated_arrival: string;
+      note: string;
+    };
+    inventory_projection: {
+      projected_stock_at_arrival: number;
+      projected_coverage_days: number;
+      source: string;
+    };
+    line_stoppage_avoided: boolean;
+    eta_deviation_days: number;
+    alert: string | null;
+    simulated: boolean;
+  } | null;
+  kpis: {
+    simulated: boolean;
+    cost_of_inaction: number;
+    action_cost: number;
+    illustrative_savings: number;
+    line_stoppage_avoided: boolean;
+    estimated_stockout_days_avoided: number;
+  } | null;
   error: string | null;
+}
+
+export interface KPIReport {
+  simulated: boolean;
+  label: string;
+  tracked_runs: number;
+  executed_runs: number;
+  line_stoppages_avoided: number;
+  illustrative_cost_of_inaction: number;
+  illustrative_action_cost: number;
+  illustrative_savings: number;
 }
 
 export interface ApiError {

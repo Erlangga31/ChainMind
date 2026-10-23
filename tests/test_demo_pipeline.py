@@ -32,7 +32,8 @@ def test_demo_recommends_vendor_b_and_creates_pending_135k_draft() -> None:
     assert run.draft_po.total_price == 135000
     assert run.draft_po.terms == "Air Freight"
     assert run.draft_po.status == "PENDING_APPROVAL"
-    assert len(run.stages) == 6
+    assert len(run.stages) == 7
+    assert run.stages[-1].name == "Execution & tracking"
     assert all(entry.reasoning for entry in run.audit_log)
 
 
@@ -51,9 +52,25 @@ def test_approval_is_the_only_path_that_executes_the_purchase_order() -> None:
     assert result.draft_po.status == "EXECUTED"
     assert result.draft_po.sap_reference is not None
     approved_run = pipeline.get_run(run.run_id)
-    assert approved_run.audit_log[-1].agent == "human"
-    assert approved_run.stages[-2].summary == "A human approved the purchase order."
-    assert "Purchase order executed as MOCK-PO-" in approved_run.stages[-1].summary
+    assert approved_run.execution_tracking is not None
+    assert approved_run.execution_tracking.ariba_reference.startswith("MOCK-ARIBA-")
+    assert approved_run.execution_tracking.confirmation.confirmed_quantity == 5000
+    assert approved_run.execution_tracking.line_stoppage_avoided is True
+    assert approved_run.execution_tracking.eta_deviation_days == 0
+    assert approved_run.execution_tracking.inventory_projection.projected_stock_at_arrival == 6000
+    assert sap.get_inventory("microchip-x").current_stock == 3000
+    assert sap.get_inventory_projection("microchip-x").projected_stock_at_arrival == 6000
+    assert approved_run.kpis is not None
+    assert approved_run.kpis.simulated is True
+    assert approved_run.kpis.illustrative_savings == (approved_run.kpis.cost_of_inaction - 135000)
+    assert any(entry.agent == "human" for entry in approved_run.audit_log)
+    approval_stage = next(stage for stage in approved_run.stages if stage.name == "Human approval")
+    assert approval_stage.summary == "A human approved the purchase order."
+    assert (
+        "Purchase order executed as MOCK-PO-"
+        in next(stage for stage in approved_run.stages if stage.name == "PO execution").summary
+    )
+    assert approved_run.stages[-1].status == "COMPLETED"
 
 
 def test_revision_replaces_draft_and_still_requires_approval() -> None:

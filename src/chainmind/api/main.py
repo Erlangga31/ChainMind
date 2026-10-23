@@ -20,6 +20,7 @@ from chainmind.core.models import (
     DisruptionEvent,
     DisruptionRun,
     ErrorResponse,
+    KPIReport,
     RunCreatedResponse,
     RunStatus,
 )
@@ -148,6 +149,30 @@ def list_runs() -> list[DisruptionRun]:
     return pipeline.store.list()
 
 
+@app.get("/kpis", response_model=KPIReport)
+def get_kpis() -> KPIReport:
+    """Return explicitly illustrative aggregate outcomes from completed tracking runs."""
+
+    tracked = [run for run in pipeline.store.list() if run.kpis is not None]
+    return KPIReport(
+        simulated=any(run.kpis.simulated for run in tracked if run.kpis is not None),
+        tracked_runs=len(tracked),
+        executed_runs=sum(run.status == RunStatus.EXECUTED for run in tracked),
+        line_stoppages_avoided=sum(
+            bool(run.kpis and run.kpis.line_stoppage_avoided) for run in tracked
+        ),
+        illustrative_cost_of_inaction=sum(
+            run.kpis.cost_of_inaction for run in tracked if run.kpis is not None
+        ),
+        illustrative_action_cost=sum(
+            run.kpis.action_cost for run in tracked if run.kpis is not None
+        ),
+        illustrative_savings=sum(
+            run.kpis.illustrative_savings for run in tracked if run.kpis is not None
+        ),
+    )
+
+
 @app.get("/runs/{run_id}", response_model=DisruptionRun)
 def get_run(run_id: UUID) -> DisruptionRun:
     """Return full analysis, comparison, reasoning, draft PO, and audit."""
@@ -238,6 +263,8 @@ def _decide_aws(run_id: UUID, decision: DecisionRequest, role: str) -> DecisionR
             if stage.name == "Human approval":
                 stage.status = "REJECTED"
             elif stage.name == "PO execution":
+                stage.status = "NOT_EXECUTED"
+            elif stage.name == "Execution & tracking":
                 stage.status = "NOT_EXECUTED"
     elif decision.decision is DecisionType.APPROVE:
         run.status = RunStatus.APPROVED

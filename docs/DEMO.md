@@ -22,6 +22,8 @@ Durasi yang disarankan: **4–6 menit**. Demo berjalan offline dengan adapter mo
 8. Tekankan gerbang human-in-the-loop: tidak ada order yang dijalankan hanya karena agent merekomendasikannya.
 9. Untuk demonstrasi aman, masukkan catatan lalu tekan **Revise vendor** dan pilih Vendor A. Draf berubah, catatan revisi tercatat, tetapi status tetap `PENDING_APPROVAL`.
 10. Pilih apakah ingin **Reject** untuk membuktikan tidak ada eksekusi, atau **Approve & execute** untuk memperlihatkan jalur persetujuan eksplisit pada mock SAP. Approval menghasilkan nomor referensi mock dan audit entry manusia.
+11. Setelah approval, tunjukkan tahap **Execution & tracking**: Ariba mengonfirmasi 5.000 pcs, ASN menampilkan ETA vendor 2 hari, dan proyeksi terpisah menunjukkan 6.000 pcs/6 hari cakupan saat barang tiba. Jelaskan bahwa angka ini simulasi dan tidak mengubah saldo stok SAP saat ini.
+12. Tampilkan KPI biaya inaction, biaya aksi, dan savings ilustratif; endpoint `GET /kpis` hanya mengagregasi run yang selesai tracking dan bukan proyeksi finansial.
 
 ## Rationale fixture demo
 

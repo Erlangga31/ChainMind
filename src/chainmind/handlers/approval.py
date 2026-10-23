@@ -74,6 +74,11 @@ def _persist_waiting_run(
                 status="WAITING_FOR_APPROVAL",
                 summary="No PO has been executed.",
             ),
+            StageResult(
+                name="Execution & tracking",
+                status="WAITING_FOR_APPROVAL",
+                summary="Supplier confirmation and shipment tracking start after approval.",
+            ),
         ],
         vendor_comparison=procurement.evaluations,
         selected_vendor_id=orchestration.selected_vendor.vendor.vendor_id,
@@ -86,6 +91,7 @@ def _persist_waiting_run(
         ],
         trace_steps=orchestration.trace,
         draft_po=purchase_order,
+        cost_of_inaction=logistics.cost_of_inaction,
         workflow_task_id=str(run_id),
         audit_log=[
             AuditEntry(

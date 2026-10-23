@@ -23,6 +23,7 @@ Sistem ERP tradisional berperan sebagai **system of record**: SAP menyimpan stok
 - Procurement membandingkan **empat vendor** Ariba, kapasitas, waktu kirim, biaya, serta estimasi dampak risiko.
 - Orchestrator memilih **Vendor B**: pengiriman 2 hari, risiko residual terendah, dan biaya aksi tersesuaikan risiko **$135.000**.
 - Mock S/4HANA mencatat draf **5.000 pcs × $27 = $135.000**, Air Freight, status **`PENDING_APPROVAL`**. Sistem menunggu approve, reject, atau revisi dari manusia.
+- Setelah disetujui, demo mencatat eksekusi S/4HANA, konfirmasi pemasok dan ASN Ariba, ETA 2 hari, proyeksi stok ilustratif 6.000 pcs, serta KPI simulasi.
 
 ## Arsitektur
 
@@ -37,8 +38,12 @@ flowchart LR
     Draft --> Approval{Persetujuan manusia}
     Approval -->|revisi vendor| Orchestrator
     Approval -->|tolak| Reject[Rejected — tanpa eksekusi]
-    Approval -->|setujui| Execution[PO execution]
+    Approval -->|setujui| Execution[Eksekusi PO di S/4HANA]
     Execution --> S4[(SAP S/4HANA)]
+    Execution --> Ariba
+    Ariba --> Tracking[Konfirmasi + ASN / ETA]
+    Tracking --> Projection[Proyeksi stok + KPI ilustratif]
+    Projection --> Done[Selesai]
     Logistics --> S4
     Procurement --> Ariba[(SAP Ariba Network)]
     Monitoring -. stage workflow .-> SFN[AWS Step Functions]
@@ -63,12 +68,13 @@ flowchart LR
 | Perbandingan pengadaan | JSON seed vendor, Procurement Agent | Lambda dan SAP Ariba Network melalui SAP Integration Suite |
 | Pemilihan dan rationale | Orchestrator Agent, MockLLMClient | Lambda, Bedrock Converse, artefak audit privat di S3 |
 | Approval dan eksekusi | API/dashboard dan mock SAP | Step Functions callback, otorisasi manusia, SAP S/4HANA |
+| Pelacakan pasca-eksekusi | Konfirmasi Ariba, ASN, proyeksi stok terpisah dari stok aktual | Lambda pelacakan, Ariba, custom API proyeksi S/4HANA |
 
 Sandbox SAP lokal pada `sandbox/sap_sandbox/` menyediakan endpoint OData, vendor Ariba, webhook Event Mesh, dan workflow approval simulasi. Sandbox ini membantu pengujian kontrak HTTP lokal; bukan koneksi atau tenant SAP produksi.
 
 Event Mesh simulator mengirim event ke `/event-bridge` dengan HMAC-SHA256. Untuk menjalankan kedua proses lokal, isi `CHAINMIND_EVENT_BRIDGE_SECRET` dan `SAP_SANDBOX_EVENT_BRIDGE_SECRET` dengan shared secret yang sama dan non-empty. `OpenMeteoWeatherClient` adalah integrasi opsional yang disabled by default; sumber gangguan lain memakai skenario mock offline.
 
-Stack CDK mendefinisikan service AWS dan callback wait. Pengaitan endpoint keputusan lokal/API dengan token callback Step Functions dan koneksi SAP nyata masih termasuk pekerjaan sebelum deployment produksi.
+Stack CDK mendefinisikan service AWS dan callback wait. API keputusan pada jalur AWS melanjutkan callback Step Functions; integrasi SAP nyata, otorisasi identitas produksi, dan verifikasi runtime AWS tetap memerlukan konfigurasi/deployment tersendiri.
 
 ## Tech stack
 
@@ -93,6 +99,9 @@ uv run uvicorn chainmind.api.main:app --app-dir src --reload
 ```
 
 API tersedia di `http://localhost:8000`; OpenAPI UI di `http://localhost:8000/docs`.
+Endpoint utama mencakup `POST /disruptions`, `GET /runs`, `GET /runs/{run_id}`,
+`POST /runs/{run_id}/decision`, dan `GET /kpis`. KPI mengagregasi run yang sudah selesai
+tracking; biaya dan savings ditandai simulasi/ilustratif, bukan proyeksi finansial.
 
 ### Dashboard
 
@@ -104,7 +113,7 @@ npm ci
 npm run dev
 ```
 
-Buka alamat Vite (umumnya `http://localhost:5173`), lalu pilih **Trigger demo disruption**. Dashboard menampilkan run, linimasa enam tahap, perbandingan vendor, ringkasan rationale, draf PO, dan kontrol approve/reject/revise.
+Buka alamat Vite (umumnya `http://localhost:5173`), lalu pilih **Trigger demo disruption**. Dashboard menampilkan run, linimasa tujuh tahap, perbandingan vendor, ringkasan rationale, draf PO, kontrol approve/reject/revise, dan hasil tracking/KPI ilustratif setelah approval.
 
 ### Tes, lint, dan sintesis infrastruktur
 
@@ -186,13 +195,13 @@ chainmind/
 ├── scripts/                  # Demo CLI
 ├── sandbox/sap_sandbox/      # Simulator lokal OData, Ariba, Event Mesh, workflow
 ├── src/chainmind/
-│   ├── agents/               # Monitoring, logistics, procurement, orchestrator
+│   ├── agents/               # Monitoring, logistics, procurement, orchestrator, tracking
 │   ├── api/                  # FastAPI routes
 │   ├── core/                 # Model, config, audit, event store, retry
 │   ├── data/                 # Seed scenario, inventory, vendor
 │   ├── handlers/             # Wrapper AWS Lambda
 │   ├── integrations/         # LLM, SAP, AWS, and external event adapters
-│   └── workflow/             # Pipeline empat stage framework-agnostic
+│   └── workflow/             # Pipeline framework-agnostic dan transisi workflow
 ├── tests/                    # Unit, API, retry, dan end-to-end
 ├── .env.example
 ├── pyproject.toml
@@ -201,9 +210,10 @@ chainmind/
 
 ## Roadmap dan batas MVP
 
-- [ ] Hubungkan `RealSAPClient` dan `RealAribaClient` ke SAP Integration Suite, OAuth, dan OData resmi.
+- [x] Tambahkan konfirmasi Ariba, ASN/ETA, proyeksi stok ilustratif, dan endpoint KPI; kontrak HTTP hanya diverifikasi terhadap sandbox.
+- [ ] Validasi custom API tracking dan seluruh mapping OData pada tenant SAP Integration Suite/Ariba yang nyata.
 - [ ] Paketkan dependency Python untuk Lambda deployment dan verifikasi runtime Python 3.12.
-- [ ] Hubungkan endpoint approval ke callback token Step Functions (`SendTaskSuccess`/`SendTaskFailure`) dan tambahkan idempotensi.
+- [x] Hubungkan endpoint approval ke callback token Step Functions (`SendTaskSuccess`/`SendTaskFailure`) dan tambahkan idempotensi.
 - [ ] Terapkan identity provider, otorisasi approver berbasis peran, dan secret management AWS Secrets Manager.
 - [ ] Perkuat retensi, audit log, observability, alarm, dan pengujian integrasi dengan SAP sandbox.
 - [ ] Uji deduplikasi serentak, rotasi HMAC, dan alur event end-to-end dalam akun AWS.

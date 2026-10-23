@@ -11,7 +11,7 @@ from infra.chainmind_stack import ChainMindStack
 def test_stack_contains_expected_workflow_and_agent_lambdas() -> None:
     template = Template.from_stack(ChainMindStack(App(), "TestChainMindStack"))
 
-    template.resource_count_is("AWS::Lambda::Function", 10)
+    template.resource_count_is("AWS::Lambda::Function", 11)
     template.resource_count_is("AWS::StepFunctions::StateMachine", 1)
     template.resource_count_is("AWS::Events::EventBus", 1)
     template.resource_count_is("AWS::Events::Rule", 2)
@@ -43,6 +43,7 @@ def test_state_machine_has_bounded_revision_and_callback_states() -> None:
     serialized = json.dumps(template.to_json())
 
     assert "WaitForHumanApproval" in serialized
+    assert "TrackSupplierExecution" in serialized
     assert "WaitForRevisedApproval3" in serialized
     assert "RevisionLimitReached" in serialized
     assert "HumanRejected" in serialized

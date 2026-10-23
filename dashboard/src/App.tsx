@@ -224,6 +224,35 @@ export default function App() {
                 </div>
               </section>
 
+              {run.execution_tracking && (
+                <section className="rounded-2xl bg-white p-5 shadow-card md:p-6">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm text-slate-500">Post-approval operations</p>
+                      <h2 className="text-lg font-bold text-ink">Execution & tracking</h2>
+                    </div>
+                    <StatusPill status={run.execution_tracking.shipment.status} />
+                  </div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">Supplier confirmation<strong className="mt-1 block text-ink">{run.execution_tracking.confirmation.confirmation_status} · {run.execution_tracking.confirmation.confirmed_quantity.toLocaleString()} pcs</strong></p>
+                    <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">ASN / ETA<strong className="mt-1 block text-ink">{run.execution_tracking.shipment.tracking_id} · {run.execution_tracking.shipment.estimated_arrival}</strong></p>
+                    <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">Projected stock<strong className="mt-1 block text-ink">{run.execution_tracking.inventory_projection.projected_stock_at_arrival.toLocaleString()} pcs · {run.execution_tracking.inventory_projection.projected_coverage_days} days</strong></p>
+                    <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">Line stoppage<strong className="mt-1 block text-ink">{run.execution_tracking.line_stoppage_avoided ? "Avoided (simulated)" : "Not avoided"}</strong></p>
+                  </div>
+                  {run.execution_tracking.alert && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{run.execution_tracking.alert}</p>}
+                  {run.kpis && (
+                    <div className="mt-4 border-t border-slate-100 pt-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Illustrative per-run KPI · not a forecast</p>
+                      <div className="mt-2 grid gap-3 sm:grid-cols-3">
+                        <p className="text-sm text-slate-500">Cost of inaction<strong className="block text-ink">{money(run.kpis.cost_of_inaction)}</strong></p>
+                        <p className="text-sm text-slate-500">Action cost<strong className="block text-ink">{money(run.kpis.action_cost)}</strong></p>
+                        <p className="text-sm text-slate-500">Illustrative savings<strong className="block text-ink">{money(run.kpis.illustrative_savings)}</strong></p>
+                      </div>
+                    </div>
+                  )}
+                </section>
+              )}
+
               <section className="rounded-2xl bg-white p-5 shadow-card md:p-6">
                 <div className="mb-4 flex items-end justify-between gap-3">
                   <div><p className="text-sm text-slate-500">SAP Ariba Network</p><h2 className="text-lg font-bold text-ink">Vendor comparison</h2></div>
