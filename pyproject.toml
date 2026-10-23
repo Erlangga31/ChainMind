@@ -27,7 +27,7 @@ include = ["src/chainmind/data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src", "sandbox"]
+pythonpath = [".", "src", "sandbox"]
 
 [tool.ruff]
 line-length = 100

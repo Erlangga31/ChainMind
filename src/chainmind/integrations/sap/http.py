@@ -136,22 +136,33 @@ class SAPHttpTransport:
             if self._csrf_token:
                 return self._csrf_token
             url = f"{self._base_url}/{path.lstrip('/')}"
-            try:
-                response = self._client.get(
-                    url,
-                    headers={
-                        "Authorization": f"Bearer {self._access_token()}",
-                        "X-CSRF-Token": "Fetch",
-                    },
-                )
-                response.raise_for_status()
-                token = response.headers.get("X-CSRF-Token")
-                if not token:
-                    raise ValueError("SAP response omitted the CSRF token.")
-            except (httpx.HTTPError, ValueError) as exc:
-                raise self._integration_error("SAP CSRF token request failed.", exc) from exc
-            self._csrf_token = token
-            return token
+            for attempt in range(self._retry_attempts):
+                try:
+                    response = self._client.get(
+                        url,
+                        headers={
+                            "Authorization": f"Bearer {self._access_token()}",
+                            "X-CSRF-Token": "Fetch",
+                        },
+                    )
+                    if response.status_code == 401 and attempt + 1 < self._retry_attempts:
+                        self._invalidate_access_token()
+                        self._sleep_before_retry(attempt)
+                        continue
+                    response.raise_for_status()
+                    token = response.headers.get("X-CSRF-Token")
+                    if not token:
+                        raise ValueError("SAP response omitted the CSRF token.")
+                    self._csrf_token = token
+                    return token
+                except (httpx.HTTPError, ValueError) as exc:
+                    if not self._should_retry(exc, attempt):
+                        raise self._integration_error(
+                            "SAP CSRF token request failed.",
+                            exc,
+                        ) from exc
+                    self._sleep_before_retry(attempt)
+            raise IntegrationError("SAP CSRF token request failed after retries.")
 
     def _invalidate_access_token(self) -> None:
         with self._lock:

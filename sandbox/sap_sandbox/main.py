@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import secrets
+import time
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from importlib.resources import files
@@ -166,11 +167,29 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
     app = FastAPI(title="ChainMind Local SAP Sandbox", version="0.1.0")
     app.state.sandbox = state
     app.state.csrf_token = secrets.token_urlsafe(24)
+    app.state.access_tokens: dict[str, float] = {}
 
     @app.middleware("http")
     async def csrf_middleware(request: Request, call_next: Any) -> Response:
-        """Issue CSRF tokens and enforce them for simulated OData writes."""
+        """Enforce demo bearer tokens and CSRF protection for SAP operations."""
 
+        if request.url.path.startswith(("/sap/", "/ariba/")):
+            authorization = request.headers.get("Authorization", "")
+            scheme, _, token = authorization.partition(" ")
+            expires_at = app.state.access_tokens.get(token, 0.0)
+            if (
+                scheme.lower() != "bearer"
+                or not token
+                or expires_at <= time.monotonic()
+                or not secrets.compare_digest(
+                    authorization,
+                    f"Bearer {token}",
+                )
+            ):
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": "invalid_token"},
+                )
         is_purchase_order = request.url.path.startswith(ODATA_PO_PATH)
         method = request.method.upper()
         if is_purchase_order and method in {"POST", "PATCH"}:
@@ -229,10 +248,13 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
                 status_code=HTTP_400_BAD_REQUEST,
                 content={"error": "unsupported_grant_type"},
             )
+        access_token = secrets.token_urlsafe(32)
+        expires_in = 3600
+        app.state.access_tokens[access_token] = time.monotonic() + expires_in
         return {
-            "access_token": secrets.token_urlsafe(32),
+            "access_token": access_token,
             "token_type": "Bearer",
-            "expires_in": 3600,
+            "expires_in": expires_in,
         }
 
     @app.get(ODATA_STOCK_PATH, response_model=None)

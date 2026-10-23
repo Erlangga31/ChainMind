@@ -160,6 +160,44 @@ def test_oauth_transport_does_not_retry_client_errors(sap_sandbox_url: str) -> N
     transport.close()
 
 
+def test_oauth_transport_refreshes_invalid_token_before_retrying() -> None:
+    token_calls = 0
+    authorization_headers: list[str] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal token_calls
+        if request.url.path == "/oauth/token":
+            token_calls += 1
+            return httpx.Response(
+                200,
+                json={"access_token": f"token-{token_calls}", "expires_in": 3600},
+            )
+        authorization_headers.append(request.headers.get("Authorization", ""))
+        if request.method == "GET" and request.headers.get("Authorization", "").endswith("token-1"):
+            return httpx.Response(401, json={"error": "invalid_token"})
+        if request.method == "GET":
+            return httpx.Response(200, headers={"X-CSRF-Token": "csrf-token"}, json={})
+        return httpx.Response(200, json={"ok": True})
+
+    client = httpx.Client(transport=httpx.MockTransport(respond), timeout=2)
+    transport = SAPHttpTransport(
+        base_url="https://sap.example.invalid",
+        token_url="https://sap.example.invalid/oauth/token",
+        credentials=SAPCredentials("client", "secret"),
+        retry_base_delay_seconds=0,
+        client=client,
+    )
+
+    result = transport.request("POST", "/purchase-orders", csrf=True)
+
+    assert result == {"ok": True}
+    assert token_calls == 2
+    assert len(authorization_headers) == 3
+    assert all(header.startswith("Bearer ") for header in authorization_headers)
+    transport.close()
+    client.close()
+
+
 def test_aws_credentials_require_a_secret_reference() -> None:
     settings = Settings(
         mode="aws",

@@ -16,7 +16,34 @@ def make_client() -> TestClient:
         event_webhook_url="http://chainmind.test/disruptions",
         workflow_callback_url="http://chainmind.test",
     )
-    return TestClient(create_app(settings))
+    client = TestClient(create_app(settings))
+    token_response = client.post(
+        "/oauth/token",
+        data={
+            "grant_type": "client_credentials",
+            "client_id": "local-demo-client",
+            "client_secret": "local-demo-secret",
+        },
+    )
+    client.headers["Authorization"] = f"Bearer {token_response.json()['access_token']}"
+    return client
+
+
+def test_sap_routes_reject_expired_and_invalid_bearer_tokens() -> None:
+    client = make_client()
+    client.headers["Authorization"] = "Bearer invalid-token"
+
+    response = client.get("/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV/A_MaterialStock")
+
+    assert response.status_code == 401
+    assert response.json()["error"] == "invalid_token"
+    client.headers["Authorization"] = "Bearer valid-looking-token"
+    client.app.state.access_tokens["valid-looking-token"] = 0
+
+    expired = client.get("/ariba/sourcing/vendors")
+
+    assert expired.status_code == 401
+    assert expired.json()["error"] == "invalid_token"
 
 
 def test_s4hana_exposes_stock_and_odata_query_options() -> None:
