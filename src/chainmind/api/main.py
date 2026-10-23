@@ -21,6 +21,7 @@ from chainmind.core.models import (
     DisruptionRun,
     ErrorResponse,
     KPIReport,
+    NotificationApprovalRequest,
     RunCreatedResponse,
     RunStatus,
 )
@@ -170,6 +171,62 @@ def get_kpis() -> KPIReport:
         illustrative_savings=sum(
             run.kpis.illustrative_savings for run in tracked if run.kpis is not None
         ),
+    )
+
+
+@app.get("/notifications/links/{token}")
+def inspect_notification_link(token: str) -> dict[str, object]:
+    """Inspect a signed link without taking an approval or financial action."""
+
+    claims = pipeline.validate_notification_link(token)
+    run = pipeline.get_run(claims.run_id)
+    if claims.action == "approve":
+        return {
+            "run_id": str(run.run_id),
+            "action": claims.action,
+            "confirmation_required": True,
+            "status": run.status,
+            "vendor_name": run.draft_po.vendor_name if run.draft_po else None,
+        }
+    return {
+        "run_id": str(run.run_id),
+        "action": claims.action,
+        "confirmation_required": False,
+        "run": run.model_dump(mode="json"),
+    }
+
+
+@app.post("/notifications/links/{token}/approve", response_model=DecisionResult)
+def approve_from_notification_link(
+    token: str,
+    confirmation: NotificationApprovalRequest,
+    role: str | None = Header(default=None, alias="X-ChainMind-Role"),
+) -> DecisionResult:
+    """Require both an authenticated approver role and explicit link confirmation."""
+
+    claims = pipeline.validate_notification_link(token)
+    if claims.action != "approve":
+        raise ChainMindError(
+            "notification_action_mismatch",
+            "This notification link is not an approval link.",
+            status_code=403,
+        )
+    if role != "approver":
+        raise ChainMindError(
+            "approver_role_required",
+            "Only a user with the approver role can decide a purchase order.",
+            status_code=403,
+        )
+    if not confirmation.confirmed:
+        raise ChainMindError(
+            "approval_confirmation_required",
+            "Explicit confirmation is required before submitting approval.",
+            status_code=422,
+        )
+    return decide(
+        claims.run_id,
+        DecisionRequest(decision=DecisionType.APPROVE, note=confirmation.note),
+        role,
     )
 
 

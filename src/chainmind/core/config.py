@@ -32,6 +32,21 @@ class Settings(BaseSettings):
     event_database_path: str = "data/chainmind-events.sqlite3"
     event_bus_name: str = "chainmind"
     event_bridge_secret: str | None = None
+    notification_backends: list[Literal["console", "teams", "slack", "email"]] = Field(
+        default_factory=lambda: ["console"]
+    )
+    notification_link_secret: str | None = None
+    notification_link_secret_id: str | None = None
+    notification_link_ttl_minutes: int = Field(default=60, ge=1, le=10_080)
+    notification_api_base_url: str = "http://localhost:8000"
+    notification_dashboard_url: str = "http://localhost:5173"
+    notification_approval_overdue_minutes: int = Field(default=1_440, ge=1)
+    notification_eta_deviation_threshold_days: float = Field(default=0, ge=0)
+    notification_teams_webhook_url: str | None = None
+    notification_slack_webhook_url: str | None = None
+    notification_email_sender: str | None = None
+    notification_email_recipient: str | None = None
+    notification_email_outbox_path: str = "data/notifications.jsonl"
     artifact_bucket_name: str = "chainmind-artifacts"
     api_cors_origins: list[str] = Field(
         default_factory=lambda: [

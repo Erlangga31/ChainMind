@@ -156,6 +156,16 @@ Salin `.env.example` ke `.env` bila ingin mengubah konfigurasi lokal. `.env` tid
 | `CHAINMIND_EVENT_DATABASE_PATH` | `data/chainmind-events.sqlite3` | File SQLite run/event lokal dan index idempotensi |
 | `CHAINMIND_EVENT_BUS_NAME` | `chainmind` | Event bus tujuan event bridge dan external poller |
 | `CHAINMIND_EVENT_BRIDGE_SECRET` | — | HMAC secret untuk verifikasi signed event bridge lokal |
+| `CHAINMIND_NOTIFICATION_BACKENDS` | `["console"]` | Channel: `console`, `teams`, `slack`, `email` |
+| `CHAINMIND_NOTIFICATION_LINK_SECRET` | — | Kunci HMAC lokal minimal 32 karakter; gunakan Secrets Manager di AWS |
+| `CHAINMIND_NOTIFICATION_LINK_SECRET_ID` | — | Secret ID untuk kunci link di AWS mode |
+| `CHAINMIND_NOTIFICATION_LINK_TTL_MINUTES` | `60` | Masa berlaku approve/view link |
+| `CHAINMIND_NOTIFICATION_APPROVAL_OVERDUE_MINUTES` | `1440` | Ambang eskalasi approval tertunda |
+| `CHAINMIND_NOTIFICATION_ETA_DEVIATION_THRESHOLD_DAYS` | `0` | Ambang alert deviasi ETA |
+| `CHAINMIND_NOTIFICATION_TEAMS_WEBHOOK_URL` | — | Incoming webhook Teams; jangan commit URL nyata |
+| `CHAINMIND_NOTIFICATION_SLACK_WEBHOOK_URL` | — | Incoming webhook Slack; jangan commit URL nyata |
+| `CHAINMIND_NOTIFICATION_EMAIL_SENDER` / `_RECIPIENT` | — | Alamat SES AWS atau metadata email mock |
+| `CHAINMIND_NOTIFICATION_EMAIL_OUTBOX_PATH` | `data/notifications.jsonl` | File outbox saat channel email berjalan di mock |
 | `CHAINMIND_ARTIFACT_BUCKET_NAME` | `chainmind-artifacts` | Nama bucket artefak yang dapat dikonfigurasi |
 | `CHAINMIND_API_CORS_ORIGINS` | `["http://localhost:5173","http://127.0.0.1:5173"]` | Daftar origin JSON yang diizinkan |
 | `CHAINMIND_SAP_BASE_URL` | — | Titik konfigurasi untuk integrasi SAP mendatang |
@@ -219,6 +229,12 @@ chainmind/
 - [ ] Uji deduplikasi serentak, rotasi HMAC, dan alur event end-to-end dalam akun AWS.
 
 **Disclaimer MVP:** integrasi SAP saat ini adalah mock/stub; seed data, event store mock, dan keputusan human-in-the-loop lokal dimaksudkan untuk demo. AWS CDK adalah scaffold yang dapat disintesis, bukan deployment atau sertifikasi kesiapan produksi.
+
+Notifikasi Teams/Slack diuji menggunakan transport HTTP mock; email lokal ditulis ke outbox JSONL,
+sedangkan SES hanya dipanggil pada AWS mode. Link tindakan bertanda tangan dan kedaluwarsa tidak
+mengeksekusi PO melalui GET: link approval memerlukan role `approver` serta konfirmasi eksplisit.
+Pengingat lokal diperiksa lewat `pipeline.check_approval_overdue`; CDK menjalankan pemeriksaan
+terjadwal dan menyediakan timeout Step Functions sebagai eskalasi cadangan.
 
 ## Kontribusi
 

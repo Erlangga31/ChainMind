@@ -21,6 +21,7 @@ from chainmind.core.models import (
     DisruptionRun,
     InventorySnapshot,
     LogisticsResult,
+    NotificationLinkPayload,
     ProcurementResult,
     RunStatus,
     StageResult,
@@ -29,6 +30,7 @@ from chainmind.core.retry import retry_integration_call
 from chainmind.integrations.llm.base import LLMClient
 from chainmind.integrations.sap.base import ApprovalWorkflowClient, AribaClient, SAPClient
 from chainmind.integrations.sap.real_clients import InMemoryApprovalWorkflowClient
+from chainmind.notifications.service import NotificationService
 from chainmind.workflow.definition import WorkflowState, validate_transition
 
 
@@ -44,6 +46,7 @@ class DisruptionPipeline:
         settings: Settings,
         store: RunStore | None = None,
         workflow_client: ApprovalWorkflowClient | None = None,
+        notification_service: NotificationService | None = None,
     ) -> None:
         self._sap = sap
         self._ariba = ariba
@@ -51,6 +54,7 @@ class DisruptionPipeline:
         self._settings = settings
         self._store = store or EventStore()
         self._workflow = workflow_client or InMemoryApprovalWorkflowClient()
+        self._notifications = notification_service
         self._monitoring = MonitoringAgent()
         self._logistics = LogisticsAgent()
         self._procurement = ProcurementAgent(ariba, settings)
@@ -81,6 +85,7 @@ class DisruptionPipeline:
                 attempts=self._settings.retry_attempts,
                 base_delay_seconds=self._settings.retry_base_delay_seconds,
             )
+            run.inventory_snapshot = inventory.model_copy(deep=True)
             coverage = inventory.current_stock / inventory.daily_consumption
             affected_records = retry_integration_call(
                 lambda: self._sap.find_affected_records(event),
@@ -249,6 +254,7 @@ class DisruptionPipeline:
             self._run_context[run.run_id] = (inventory, logistics, procurement)
             run.updated_at = datetime.now(UTC)
             self._store.save(run)
+            self._notify(run, "draft_ready")
             return run
         except ChainMindError as exc:
             self._transition(run, WorkflowState.FAILED)
@@ -278,6 +284,38 @@ class DisruptionPipeline:
                 details={"run_id": str(run_id)},
             )
         return run
+
+    def check_approval_overdue(self, *, now: datetime | None = None) -> int:
+        """Notify once for pending approvals older than the configured threshold."""
+
+        current_time = now or datetime.now(UTC)
+        overdue_before = current_time.timestamp() - (
+            self._settings.notification_approval_overdue_minutes * 60
+        )
+        notified = 0
+        for run in self._store.list():
+            if (
+                run.status != RunStatus.PENDING_APPROVAL
+                or run.approval_overdue_notified
+                or run.created_at.timestamp() > overdue_before
+            ):
+                continue
+            if self._notify(run, "approval_overdue"):
+                run.approval_overdue_notified = True
+                run.audit_log.append(
+                    AuditEntry(
+                        agent="notifications",
+                        input_summary=f"run_id={run.run_id}",
+                        output_summary="Approval overdue escalation delivered.",
+                        reasoning=(
+                            "The approval exceeded the configured "
+                            f"{self._settings.notification_approval_overdue_minutes}-minute limit."
+                        ),
+                    )
+                )
+                self._store.save(run)
+                notified += 1
+        return notified
 
     def decide(self, run_id: UUID, decision: DecisionRequest) -> DecisionResult:
         """Record approval, rejection, or a human-selected vendor revision."""
@@ -494,6 +532,11 @@ class DisruptionPipeline:
                     reasoning="The reported ETA exceeds the selected vendor's quoted lead time.",
                 )
             )
+            if (
+                tracking.eta_deviation_days
+                > self._settings.notification_eta_deviation_threshold_days
+            ):
+                self._notify(run, "tracking_deviation")
         run.chain_of_thought.append(
             f"[SAP Ariba] Supplier confirmed the PO; ASN {shipment.tracking_id} "
             f"estimates arrival {shipment.estimated_arrival.isoformat()}."
@@ -513,6 +556,70 @@ class DisruptionPipeline:
             ),
             draft_po=run.draft_po,
         )
+
+    def _notify(self, run: DisruptionRun, event_kind: str) -> bool:
+        """Send a channel notification and retain an explicit audit on delivery failure."""
+
+        if self._notifications is None:
+            return False
+        try:
+            message = self._notifications.notify(run, event_kind)
+        except ChainMindError as exc:
+            run.audit_log.append(
+                AuditEntry(
+                    agent="notifications",
+                    input_summary=f"run_id={run.run_id}; event={event_kind}",
+                    output_summary=f"Notification delivery failed: {exc.code}.",
+                    reasoning=exc.message,
+                )
+            )
+            self._store.save(run)
+            return False
+        run.audit_log.append(
+            AuditEntry(
+                agent="notifications",
+                input_summary=f"run_id={run.run_id}; event={event_kind}",
+                output_summary=(
+                    f"Notification delivered to {self._notifications.channel_count} channel(s)."
+                ),
+                reasoning=self._notifications.audit_summary(message),
+            )
+        )
+        self._store.save(run)
+        return True
+
+    def validate_notification_link(self, token: str) -> NotificationLinkPayload:
+        """Validate a signed notification link, if notifications are configured."""
+
+        if self._notifications is None:
+            raise ChainMindError(
+                "notifications_disabled",
+                "Notification links are not enabled.",
+                status_code=404,
+            )
+        return self._notifications.validate_link(token)
+
+    def create_notification_link(
+        self,
+        run_id: UUID,
+        action: str,
+    ) -> str:
+        """Create a signed action link scoped to a stored run."""
+
+        if action not in {"approve", "view"}:
+            raise ChainMindError(
+                "invalid_notification_action",
+                "Notification link action must be approve or view.",
+                status_code=422,
+            )
+        self.get_run(run_id)
+        if self._notifications is None:
+            raise ChainMindError(
+                "notifications_disabled",
+                "Notification links are not enabled.",
+                status_code=404,
+            )
+        return self._notifications.create_link(run_id, action)
 
     def _revise(self, run: DisruptionRun, decision: DecisionRequest) -> DecisionResult:
         if not decision.vendor_id:

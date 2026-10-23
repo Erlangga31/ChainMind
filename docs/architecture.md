@@ -26,6 +26,10 @@ flowchart TD
     Track --> Projection[S/4HANA illustrative inventory projection]
     Projection --> KPIs[Per-run and aggregate illustrative KPIs]
     KPIs --> Done[Tracking complete]
+    Draft -. draft-ready alert .-> Notify[Teams / Slack / Email]
+    Human -. overdue escalation .-> Notify
+    Track -. ETA deviation .-> Notify
+    Notify --> Links[Signed expiring review / view links]
     Core --> SAP[(SAP S/4HANA)]
     P --> Ariba[(SAP Ariba Network)]
     Track --> Ariba
@@ -56,6 +60,7 @@ For local development the FastAPI route calls the same sequential pipeline used 
 | PO execution | `SAPClient.execute_purchase_order` | Mock S/4HANA in-memory record | S/4HANA via SAP Integration Suite, only after approval |
 | Execution and tracking | `TrackingAgent`, typed confirmation/ASN/projection/KPI models | Ariba sandbox confirms the submitted PO and returns a vendor-specific ETA; projection is separate from current stock | Tracking Lambda after execution; Ariba confirmation/ASN; custom S/4HANA projection API |
 | KPI reporting | `RunKPI`, aggregate `GET /kpis` | Values marked simulated/illustrative | DynamoDB-backed run aggregation; not a financial forecast |
+| Notifications | `NotificationService` and `Notifier` contract | Console, JSONL email outbox, configurable mock webhooks | Teams/Slack webhooks, SES, scheduled pending-approval scan, Step Functions timeout escalation |
 | Run/audit storage | `RunStore` contract | SQLite snapshots and unique idempotency key (configurable, defaults to `data/chainmind-events.sqlite3`) | DynamoDB run records and event-key index; private S3 rationale artifacts |
 
 The separate local SAP sandbox (`sandbox/sap_sandbox/`) exposes OData-like S/4HANA material-stock
@@ -100,6 +105,12 @@ After approval, the tracking stage records the Ariba confirmation and vendor-spe
 then calculates projected stock at arrival without overwriting the SAP current-stock snapshot.
 Per-run `cost_of_inaction`, action cost, and savings are labeled simulated/illustrative and do not
 represent a financial forecast. `GET /kpis` aggregates only runs with completed tracking.
+
+Notifications are generated for a ready draft, overdue pending approval, and ETA deviation. Approve
+links are signed, scoped, and expiring; opening one only presents a review. The decision endpoint
+still requires an approver role and an explicit confirmation request. Local mode uses an ephemeral
+process key unless `CHAINMIND_NOTIFICATION_LINK_SECRET` is configured, so mock links do not survive
+restarts by default. AWS mode reads the signing key from Secrets Manager.
 
 ## Trust boundary and failure behavior
 

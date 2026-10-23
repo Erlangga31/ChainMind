@@ -12,6 +12,7 @@ from chainmind.core.models import (
     AuditEntry,
     DisruptionEvent,
     DisruptionRun,
+    InventorySnapshot,
     LogisticsResult,
     MonitoringResult,
     OrchestratorResult,
@@ -33,6 +34,7 @@ def _persist_waiting_run(
     try:
         event = DisruptionEvent.model_validate(payload["event"])
         monitoring = MonitoringResult.model_validate(payload["monitoring"]["result"])
+        inventory = InventorySnapshot.model_validate(payload["monitoring"]["inventory"])
         logistics = LogisticsResult.model_validate(payload["logistics"])
         procurement = ProcurementResult.model_validate(payload["procurement"])
         orchestration = OrchestratorResult.model_validate(payload["orchestration"]["result"])
@@ -92,6 +94,7 @@ def _persist_waiting_run(
         trace_steps=orchestration.trace,
         draft_po=purchase_order,
         cost_of_inaction=logistics.cost_of_inaction,
+        inventory_snapshot=inventory,
         workflow_task_id=str(run_id),
         audit_log=[
             AuditEntry(
@@ -135,9 +138,10 @@ def store_task_token(event: dict[str, Any], context: object) -> dict[str, str]:
         raise IntegrationError("Approval callback is missing its run ID, token, or table name.")
     run_payload = event.get("run")
     region_name = os.environ.get("CHAINMIND_AWS_REGION", "us-east-1")
+    run = None
     if isinstance(run_payload, dict):
         try:
-            _persist_waiting_run(run_payload, table_name, region_name)
+            run = _persist_waiting_run(run_payload, table_name, region_name)
         except IntegrationError:
             raise
     try:
@@ -149,4 +153,22 @@ def store_task_token(event: dict[str, Any], context: object) -> dict[str, str]:
         )
     except (BotoCoreError, ClientError) as exc:
         raise IntegrationError("The approval callback token could not be stored.") from exc
+    from chainmind.core.config import Settings
+    from chainmind.factory import create_notification_service
+
+    notification_service = create_notification_service(Settings())
+    if notification_service is not None and run is not None:
+        message = notification_service.notify(run, "draft_ready")
+        run.audit_log.append(
+            AuditEntry(
+                agent="notifications",
+                input_summary=f"run_id={run.run_id}; event=draft_ready",
+                output_summary=(
+                    f"Draft notification delivered to "
+                    f"{notification_service.channel_count} channel(s)."
+                ),
+                reasoning=(notification_service.audit_summary(message)),
+            )
+        )
+        DynamoDBEventStore(table_name, region_name).save(run)
     return {"run_id": run_id, "status": "PENDING_APPROVAL"}

@@ -11,11 +11,19 @@ from infra.chainmind_stack import ChainMindStack
 def test_stack_contains_expected_workflow_and_agent_lambdas() -> None:
     template = Template.from_stack(ChainMindStack(App(), "TestChainMindStack"))
 
-    template.resource_count_is("AWS::Lambda::Function", 11)
+    template.resource_count_is("AWS::Lambda::Function", 12)
     template.resource_count_is("AWS::StepFunctions::StateMachine", 1)
     template.resource_count_is("AWS::Events::EventBus", 1)
-    template.resource_count_is("AWS::Events::Rule", 2)
-    template.resource_count_is("AWS::SecretsManager::Secret", 1)
+    template.resource_count_is("AWS::Events::Rule", 3)
+    template.resource_count_is("AWS::SecretsManager::Secret", 2)
+    template.has_resource_properties(
+        "AWS::SecretsManager::Secret",
+        {"Name": "chainmind/notification-links"},
+    )
+    template.has_resource_properties(
+        "AWS::Events::Rule",
+        {"ScheduleExpression": "rate(15 minutes)"},
+    )
     template.resource_count_is("AWS::SQS::Queue", 1)
     template.has_resource_properties(
         "AWS::ApiGateway::Resource",
@@ -43,6 +51,7 @@ def test_state_machine_has_bounded_revision_and_callback_states() -> None:
     serialized = json.dumps(template.to_json())
 
     assert "WaitForHumanApproval" in serialized
+    assert "ApprovalTimedOutAfterEscalation" in serialized
     assert "TrackSupplierExecution" in serialized
     assert "WaitForRevisedApproval3" in serialized
     assert "RevisionLimitReached" in serialized

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from enum import StrEnum
+from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -288,6 +289,33 @@ class KPIReport(DomainModel):
     illustrative_savings: float
 
 
+class NotificationMessage(DomainModel):
+    """Rendered alert and signed actions dispatched to configured channels."""
+
+    run_id: UUID
+    event_kind: str
+    subject: str
+    text: str
+    approve_url: str
+    view_url: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class NotificationLinkPayload(DomainModel):
+    """Short-lived signed action link claims."""
+
+    run_id: UUID
+    action: Literal["approve", "view"]
+    expires_at: int = Field(gt=0)
+
+
+class NotificationApprovalRequest(DomainModel):
+    """Explicit confirmation required after opening a signed approval link."""
+
+    confirmed: bool
+    note: str = Field(default="", max_length=1_000)
+
+
 class DisruptionRun(DomainModel):
     """Persisted result of one disruption analysis."""
 
@@ -308,6 +336,8 @@ class DisruptionRun(DomainModel):
     cost_of_inaction: float = Field(default=0, ge=0)
     execution_tracking: ExecutionTracking | None = None
     kpis: RunKPI | None = None
+    inventory_snapshot: InventorySnapshot | None = None
+    approval_overdue_notified: bool = False
     workflow_task_id: str | None = None
     last_decision: DecisionRequest | None = None
     audit_log: list[AuditEntry] = Field(default_factory=list)

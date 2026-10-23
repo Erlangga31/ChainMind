@@ -23,7 +23,11 @@ from chainmind.core.models import (
     RunStatus,
 )
 from chainmind.core.retry import retry_integration_call
-from chainmind.factory import create_llm_client, create_sap_clients
+from chainmind.factory import (
+    create_llm_client,
+    create_notification_service,
+    create_sap_clients,
+)
 from chainmind.integrations.aws.event_store import DynamoDBEventStore
 from chainmind.workflow.definition import WorkflowState
 
@@ -295,6 +299,21 @@ def track_execution(event: dict[str, Any], context: object) -> dict[str, Any]:
                 reasoning="The reported ETA exceeds the selected vendor's quoted lead time.",
             )
         )
+        if tracking.eta_deviation_days > settings.notification_eta_deviation_threshold_days:
+            notifications = create_notification_service(settings)
+            if notifications is not None:
+                message = notifications.notify(run, "tracking_deviation")
+                run.audit_log.append(
+                    AuditEntry(
+                        agent="notifications",
+                        input_summary=f"run_id={run.run_id}; event=tracking_deviation",
+                        output_summary=(
+                            f"ETA deviation notification delivered to "
+                            f"{notifications.channel_count} channel(s)."
+                        ),
+                        reasoning=notifications.audit_summary(message),
+                    )
+                )
     run.chain_of_thought.extend(
         [
             f"[SAP Ariba] Supplier confirmed the PO; ASN {shipment.tracking_id} "

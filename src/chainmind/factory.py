@@ -1,5 +1,10 @@
 """Composition root for local and AWS-backed integration implementations."""
 
+import secrets
+
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
+
 from chainmind.core.config import Settings, get_settings
 from chainmind.core.errors import IntegrationError
 from chainmind.core.events import RunStore, SQLiteEventStore
@@ -18,6 +23,14 @@ from chainmind.integrations.sap.real_clients import (
     SandboxWorkflowClient,
     make_transport,
 )
+from chainmind.notifications.channels import (
+    ConsoleNotifier,
+    EmailNotifier,
+    SlackNotifier,
+    TeamsNotifier,
+)
+from chainmind.notifications.links import NotificationLinkSigner
+from chainmind.notifications.service import NotificationService
 from chainmind.workflow.pipeline import DisruptionPipeline
 
 
@@ -82,6 +95,65 @@ def create_sap_clients(
     )
 
 
+def create_notification_service(settings: Settings | None = None) -> NotificationService | None:
+    """Build configured notification channels and a short-lived-link signer."""
+
+    config = settings or get_settings()
+    if not config.notification_backends:
+        return None
+    secret = config.notification_link_secret
+    if not secret and config.mode == "aws" and config.notification_link_secret_id:
+        try:
+            secret_response = boto3.client(
+                "secretsmanager",
+                region_name=config.aws_region,
+            ).get_secret_value(SecretId=config.notification_link_secret_id)
+            secret = secret_response.get("SecretString")
+            if not isinstance(secret, str) or len(secret) < 32:
+                raise ValueError("The notification link secret is missing or too short.")
+        except (BotoCoreError, ClientError, ValueError) as exc:
+            raise IntegrationError(
+                "The notification link signing secret could not be loaded."
+            ) from exc
+    if not secret:
+        if config.mode == "aws":
+            raise IntegrationError("A notification link signing secret is required in AWS mode.")
+        secret = secrets.token_urlsafe(32)
+    notifiers = []
+    for backend in config.notification_backends:
+        if backend == "console":
+            notifiers.append(ConsoleNotifier())
+        elif backend == "teams":
+            if not config.notification_teams_webhook_url:
+                raise IntegrationError("The Teams webhook URL is required for Teams notifications.")
+            notifiers.append(TeamsNotifier(config.notification_teams_webhook_url))
+        elif backend == "slack":
+            if not config.notification_slack_webhook_url:
+                raise IntegrationError("The Slack webhook URL is required for Slack notifications.")
+            notifiers.append(SlackNotifier(config.notification_slack_webhook_url))
+        elif backend == "email":
+            if not config.notification_email_sender or not config.notification_email_recipient:
+                raise IntegrationError(
+                    "Email sender and recipient are required for email notifications."
+                )
+            notifiers.append(
+                EmailNotifier(
+                    mode=config.mode,
+                    sender=config.notification_email_sender,
+                    recipient=config.notification_email_recipient,
+                    region_name=config.aws_region,
+                    outbox_path=config.notification_email_outbox_path,
+                )
+            )
+    signer = NotificationLinkSigner(secret, config.notification_link_ttl_minutes)
+    return NotificationService(
+        notifiers,
+        signer,
+        api_base_url=config.notification_api_base_url,
+        dashboard_url=config.notification_dashboard_url,
+    )
+
+
 def create_pipeline(
     settings: Settings | None = None,
     store: RunStore | None = None,
@@ -89,6 +161,7 @@ def create_pipeline(
     sap_client: SAPClient | None = None,
     ariba_client: AribaClient | None = None,
     llm_client: LLMClient | None = None,
+    notification_service: NotificationService | None = None,
 ) -> DisruptionPipeline:
     """Build a pipeline using independently configured SAP and model adapters."""
 
@@ -101,6 +174,7 @@ def create_pipeline(
         llm=llm_client or llm,
         settings=config,
         workflow_client=workflow,
+        notification_service=notification_service or create_notification_service(config),
         store=store
         or (
             DynamoDBEventStore(config.event_table_name, config.aws_region)

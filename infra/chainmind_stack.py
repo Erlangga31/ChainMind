@@ -213,6 +213,34 @@ class ChainMindStack(Stack):
             ),
             removal_policy=RemovalPolicy.RETAIN,
         )
+        notification_link_secret = secretsmanager.Secret(
+            self,
+            "NotificationLinkSigningSecret",
+            secret_name="chainmind/notification-links",
+            description="HMAC key used to sign expiring notification action links.",
+            generate_secret_string=secretsmanager.SecretStringGenerator(
+                password_length=48,
+                exclude_punctuation=True,
+            ),
+            removal_policy=RemovalPolicy.RETAIN,
+        )
+        for notification_function in (approval_callback, track_execution, api_handler):
+            notification_link_secret.grant_read(notification_function)
+            notification_function.add_environment(
+                "CHAINMIND_NOTIFICATION_LINK_SECRET_ID",
+                notification_link_secret.secret_arn,
+            )
+        overdue_notifier = make_function(
+            "ApprovalOverdueNotifier",
+            "chainmind.handlers.notifications.approval_overdue",
+            "Escalate approvals that remain pending beyond their configured age.",
+        )
+        event_store.grant_read_write_data(overdue_notifier)
+        notification_link_secret.grant_read(overdue_notifier)
+        overdue_notifier.add_environment(
+            "CHAINMIND_NOTIFICATION_LINK_SECRET_ID",
+            notification_link_secret.secret_arn,
+        )
         event_bridge_handler = make_function(
             "EventMeshBridge",
             "chainmind.handlers.event_bridge.handler",
@@ -488,6 +516,31 @@ class ChainMindStack(Stack):
             result_path="$.approval",
             task_timeout=sfn.Timeout.duration(Duration.days(7)),
         )
+        approval_timeout_escalation = tasks.LambdaInvoke(
+            self,
+            "EscalateTimedOutApproval",
+            lambda_function=overdue_notifier,
+            payload=sfn.TaskInput.from_json_path_at("$"),
+            payload_response_only=True,
+            result_path="$.overdue_escalation",
+        )
+        approval_timeout_escalation.add_retry(
+            errors=["States.TaskFailed"],
+            interval=Duration.seconds(2),
+            backoff_rate=2,
+            max_attempts=3,
+        )
+        approval_timeout_escalation.add_catch(
+            failure_task,
+            errors=["States.ALL"],
+            result_path="$.error",
+        )
+        approval_timeout_escalation.next(sfn.Succeed(self, "ApprovalTimedOutAfterEscalation"))
+        approval_task.add_catch(
+            approval_timeout_escalation,
+            errors=["States.Timeout"],
+            result_path="$.approval_timeout",
+        )
         execute_task = tasks.LambdaInvoke(
             self,
             "ExecutePurchaseOrderAfterApproval",
@@ -618,6 +671,11 @@ class ChainMindStack(Stack):
                     result_path="$.approval",
                     task_timeout=sfn.Timeout.duration(Duration.days(7)),
                 )
+                revised_approval_task.add_catch(
+                    approval_timeout_escalation,
+                    errors=["States.Timeout"],
+                    result_path="$.approval_timeout",
+                )
                 revised_approval_task.add_catch(rejected, errors=["HumanRejected"])
                 revised_approval_task.add_catch(
                     failure_task,
@@ -731,6 +789,12 @@ class ChainMindStack(Stack):
             schedule=events.Schedule.rate(Duration.minutes(15)),
             targets=[event_targets.LambdaFunction(external_poll)],
         )
+        events.Rule(
+            self,
+            "ApprovalOverdueEscalationSchedule",
+            schedule=events.Schedule.rate(Duration.minutes(15)),
+            targets=[event_targets.LambdaFunction(overdue_notifier)],
+        )
 
         # API Gateway forwards the documented API surface to the FastAPI Lambda.
         api = apigateway.RestApi(
@@ -746,6 +810,11 @@ class ChainMindStack(Stack):
         integration = apigateway.LambdaIntegration(api_handler)
         api.root.add_resource("health").add_method("GET", integration)
         api.root.add_resource("disruptions").add_method("POST", integration)
+        api.root.add_resource("kpis").add_method("GET", integration)
+        notification_links = api.root.add_resource("notifications").add_resource("links")
+        notification_link = notification_links.add_resource("{token}")
+        notification_link.add_method("GET", integration)
+        notification_link.add_resource("approve").add_method("POST", integration)
         api.root.add_resource("event-bridge").add_method(
             "POST",
             apigateway.LambdaIntegration(event_bridge_handler),
