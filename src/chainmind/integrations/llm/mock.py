@@ -1,6 +1,6 @@
 """Offline deterministic LLM implementation."""
 
-from chainmind.core.models import VendorEvaluation
+from chainmind.core.models import LLMExplanation, ReasoningTraceStep, VendorEvaluation
 
 
 class MockLLMClient:
@@ -12,9 +12,11 @@ class MockLLMClient:
         selected: VendorEvaluation,
         alternatives: list[VendorEvaluation],
         cost_of_inaction: float,
-    ) -> str:
-        """Return a rule-based explanation of the selected alternative."""
+        run_id: str | None = None,
+    ) -> LLMExplanation:
+        """Return a stable explanation with the same trace shape as AWS adapters."""
 
+        del run_id
         ranked = sorted(alternatives, key=lambda item: item.risk_adjusted_total)
         other_options = [
             item for item in ranked if item.vendor.vendor_id != selected.vendor.vendor_id
@@ -27,7 +29,7 @@ class MockLLMClient:
             else ""
         )
         if ranked[0].vendor.vendor_id != selected.vendor.vendor_id:
-            return (
+            text = (
                 f"{selected.vendor.vendor_name} was retained at a human's request. "
                 f"Its {selected.vendor.lead_time_days:g}-day lead time has a "
                 f"${selected.risk_adjusted_total:,.0f} risk-adjusted total compared "
@@ -36,12 +38,22 @@ class MockLLMClient:
                 f"${cost_of_inaction:,.0f}.{comparison} The replacement draft still "
                 "requires human approval before any SAP purchase-order execution."
             )
-        return (
-            f"{selected.vendor.vendor_name} is recommended: its "
-            f"{selected.vendor.lead_time_days:g}-day "
-            f"lead time has a ${selected.risk_adjusted_total:,.0f} risk-adjusted "
-            f"response cost against ${cost_of_inaction:,.0f} cost of inaction. "
-            f"Its risk-adjusted total is ${selected.risk_adjusted_total:,.0f}."
-            f"{comparison} A human must approve the draft before any SAP purchase-order "
-            "execution."
+        else:
+            text = (
+                f"{selected.vendor.vendor_name} is recommended: its "
+                f"{selected.vendor.lead_time_days:g}-day "
+                f"lead time has a ${selected.risk_adjusted_total:,.0f} risk-adjusted "
+                f"response cost against ${cost_of_inaction:,.0f} cost of inaction. "
+                f"Its risk-adjusted total is ${selected.risk_adjusted_total:,.0f}."
+                f"{comparison} A human must approve the draft before any SAP purchase-order "
+                "execution."
+            )
+        return LLMExplanation(
+            text=text,
+            trace=[
+                ReasoningTraceStep(
+                    source="Amazon Bedrock",
+                    text="Mock provider generated a deterministic explanation offline.",
+                ),
+            ],
         )

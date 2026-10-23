@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     llm_backend: Literal["mock", "bedrock", "bedrock_agents"] | None = None
     aws_region: str = "us-east-1"
     bedrock_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0"
+    bedrock_agent_id: str | None = None
+    bedrock_agent_alias_id: str | None = None
     stockout_tolerance_days: float = Field(default=0.0, ge=0)
     safety_reserve_days: float = Field(default=0.25, ge=0)
     retry_attempts: int = Field(default=3, ge=1, le=8)

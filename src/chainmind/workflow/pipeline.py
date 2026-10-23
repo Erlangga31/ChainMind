@@ -136,7 +136,11 @@ class DisruptionPipeline:
             self._store.save(run)
 
             orchestration = retry_integration_call(
-                lambda: self._orchestrator.choose(procurement, logistics),
+                lambda: self._orchestrator.choose(
+                    procurement,
+                    logistics,
+                    run_id=str(run.run_id),
+                ),
                 attempts=self._settings.retry_attempts,
                 base_delay_seconds=self._settings.retry_base_delay_seconds,
             )
@@ -152,6 +156,10 @@ class DisruptionPipeline:
             run.selected_vendor_id = orchestration.selected_vendor.vendor.vendor_id
             run.draft_po = draft
             run.workflow_task_id = workflow_task_id
+            run.trace_steps.extend(orchestration.trace)
+            run.chain_of_thought.extend(
+                f"[{step.source}] {step.text}" for step in orchestration.trace
+            )
             run.chain_of_thought.append(orchestration.reasoning)
             run.audit_log.append(
                 audit_for(
@@ -160,6 +168,16 @@ class DisruptionPipeline:
                     f"vendors={len(procurement.evaluations)}",
                 )
             )
+            if orchestration.fallback_used:
+                run.audit_log.append(
+                    AuditEntry(
+                        agent="orchestrator",
+                        input_summary=f"run_id={run.run_id}",
+                        output_summary="A deterministic explanation fallback was used.",
+                        reasoning=orchestration.fallback_reason
+                        or "The model output did not pass validation.",
+                    )
+                )
             run.audit_log.append(
                 AuditEntry(
                     agent="sap_s4hana",
@@ -341,7 +359,12 @@ class DisruptionPipeline:
         procurement = self._procurement.compare(run.event, inventory, logistics)
         run.vendor_comparison = procurement.evaluations
         revised = retry_integration_call(
-            lambda: self._orchestrator.choose(procurement, logistics, vendor_id=decision.vendor_id),
+            lambda: self._orchestrator.choose(
+                procurement,
+                logistics,
+                vendor_id=decision.vendor_id,
+                run_id=str(run.run_id),
+            ),
             attempts=self._settings.retry_attempts,
             base_delay_seconds=self._settings.retry_base_delay_seconds,
         )
@@ -356,6 +379,8 @@ class DisruptionPipeline:
         run.selected_vendor_id = revised.selected_vendor.vendor.vendor_id
         run.revision_note = decision.note
         run.last_decision = decision.model_copy(deep=True)
+        run.trace_steps.extend(revised.trace)
+        run.chain_of_thought.extend(f"[{step.source}] {step.text}" for step in revised.trace)
         run.chain_of_thought.append(f"Human-requested revision: {revised.reasoning}")
         run.audit_log.append(
             audit_for(
@@ -363,6 +388,16 @@ class DisruptionPipeline:
                 f"requested_vendor={decision.vendor_id}; note={decision.note}",
             )
         )
+        if revised.fallback_used:
+            run.audit_log.append(
+                AuditEntry(
+                    agent="orchestrator",
+                    input_summary=f"run_id={run.run_id}",
+                    output_summary="A deterministic explanation fallback was used.",
+                    reasoning=revised.fallback_reason
+                    or "The model output did not pass validation.",
+                )
+            )
         run.audit_log.append(
             AuditEntry(
                 agent="sap_s4hana",

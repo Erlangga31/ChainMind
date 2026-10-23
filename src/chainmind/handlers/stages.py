@@ -104,6 +104,9 @@ def orchestrator(event: dict[str, Any], context: object) -> dict[str, Any]:
                         {
                             "event_id": str(disruption.event_id),
                             "reasoning": result.reasoning,
+                            "trace": [step.model_dump(mode="json") for step in result.trace],
+                            "fallback_used": result.fallback_used,
+                            "fallback_reason": result.fallback_reason,
                             "selected_vendor": result.selected_vendor.vendor.vendor_name,
                         }
                     ).encode("utf-8"),

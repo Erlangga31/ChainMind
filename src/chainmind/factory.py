@@ -1,10 +1,12 @@
 """Composition root for local and AWS-backed integration implementations."""
 
 from chainmind.core.config import Settings, get_settings
+from chainmind.core.errors import IntegrationError
 from chainmind.core.events import EventStore, RunStore
 from chainmind.integrations.aws.event_store import DynamoDBEventStore
 from chainmind.integrations.llm.base import LLMClient
 from chainmind.integrations.llm.bedrock import BedrockLLMClient
+from chainmind.integrations.llm.bedrock_agents import BedrockAgentsClient
 from chainmind.integrations.llm.mock import MockLLMClient
 from chainmind.integrations.sap.base import ApprovalWorkflowClient, AribaClient, SAPClient
 from chainmind.integrations.sap.mock_ariba import MockAribaClient
@@ -26,6 +28,16 @@ def create_llm_client(settings: Settings | None = None) -> LLMClient:
     backend = config.resolved_llm_backend
     if backend == "mock":
         return MockLLMClient()
+    if backend == "bedrock_agents":
+        if not config.bedrock_agent_id or not config.bedrock_agent_alias_id:
+            raise IntegrationError(
+                "Bedrock Agent ID and alias ID must be configured for bedrock_agents."
+            )
+        return BedrockAgentsClient(
+            config.bedrock_agent_id,
+            config.bedrock_agent_alias_id,
+            config.aws_region,
+        )
     return BedrockLLMClient(config.bedrock_model_id, config.aws_region)
 
 

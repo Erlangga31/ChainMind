@@ -2,7 +2,7 @@
 
 from typing import Protocol
 
-from chainmind.core.models import VendorEvaluation
+from chainmind.core.models import LLMExplanation, VendorEvaluation
 
 
 class LLMClient(Protocol):
@@ -14,5 +14,6 @@ class LLMClient(Protocol):
         selected: VendorEvaluation,
         alternatives: list[VendorEvaluation],
         cost_of_inaction: float,
-    ) -> str:
-        """Explain the recommended supplier and the inaction comparison."""
+        run_id: str | None = None,
+    ) -> LLMExplanation:
+        """Explain the deterministic supplier choice and return source-attributed trace."""

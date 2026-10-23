@@ -24,7 +24,9 @@ flowchart TD
     P --> Ariba[(SAP Ariba Network)]
     O --> LLM[LLMClient]
     LLM --> MockLLM[MockLLMClient default]
-    LLM --> Bedrock[Amazon Bedrock Converse]
+    LLM --> Bedrock[Amazon Bedrock Converse / Agents]
+    Bedrock --> Actions[Lambda Action Groups]
+    Actions --> Core
     Core --> Store[(DynamoDB event store)]
     O --> Audit[(Private S3 audit / rationale artifacts)]
 ```
@@ -39,7 +41,7 @@ For local development the FastAPI route calls the same sequential pipeline used 
 | 1. Monitoring | `MonitoringAgent` | JSON inventory snapshot | Monitoring Lambda; reads S/4HANA inventory |
 | 2. Logistics | `LogisticsAgent` | Seed stock and consumption | Logistics Lambda; estimates stockout days and line loss |
 | 3. Procurement | `ProcurementAgent` | Seed Ariba quotes | Procurement Lambda; SAP Ariba Network through SAP Integration Suite |
-| 4. Orchestration | `OrchestratorAgent`, `LLMClient` | Deterministic `MockLLMClient` | Orchestrator Lambda; Bedrock Converse when `CHAINMIND_MODE=aws` |
+| 4. Orchestration | `OrchestratorAgent`, `LLMClient` | Deterministic `MockLLMClient` | Four Bedrock Agents, aliases, Lambda action groups, and shared guardrail; model output explains but cannot change Python's selection |
 | Human approval | `DisruptionPipeline.decide` | FastAPI / dashboard | Step Functions callback token (API completion wiring remains a deployment TODO) |
 | PO execution | `SAPClient.execute_purchase_order` | Mock S/4HANA in-memory record | S/4HANA via SAP Integration Suite, only after approval |
 | Run/audit storage | `EventStore` | Thread-safe process memory | DynamoDB event table and private S3 rationale artifacts |
@@ -56,6 +58,14 @@ This validates HTTP behavior against the simulator only; SAP tenant authorizatio
 versions, proxy setup, and service-specific field mapping require verification against SAP.
 
 The `core` package contains Pydantic domain models, agent decisions, audit entries, and the sequential workflow. FastAPI, Lambda, boto3-backed storage, Bedrock, and SAP are adapters around that logic. The orchestration calculation is deterministic; the LLM client explains the result and does not choose or override the winning vendor.
+
+Bedrock Agent instructions live in `src/chainmind/prompts/`; action contracts live in
+`infra/schemas/`. Action-group handlers validate the Bedrock event and Pydantic domain input
+before calling existing agents and SAP interfaces. The mock and Bedrock adapters return the
+same source-attributed trace model. Invalid or low-confidence agent output uses a deterministic
+explanation fallback and adds an audit entry; it never changes the already-selected vendor or
+financial calculations. Bedrock resources and their Lambda permissions have been template-tested
+only; deployment and runtime behavior require an AWS account with model access.
 
 ## Decision economics
 

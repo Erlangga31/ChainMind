@@ -12,6 +12,9 @@ from aws_cdk import (
     aws_apigateway as apigateway,
 )
 from aws_cdk import (
+    aws_bedrock as bedrock,
+)
+from aws_cdk import (
     aws_dynamodb as dynamodb,
 )
 from aws_cdk import (
@@ -48,6 +51,15 @@ class ChainMindStack(Stack):
             raise ValueError("Set CDK context chainmindMode to 'mock' or 'aws'.")
         bedrock_model_id = str(
             self.node.try_get_context("bedrockModelId") or "anthropic.claude-3-haiku-20240307-v1:0"
+        )
+        llm_backend = str(
+            self.node.try_get_context("llmBackend")
+            or ("mock" if chainmind_mode == "mock" else "bedrock_agents")
+        )
+        if llm_backend not in {"mock", "bedrock", "bedrock_agents"}:
+            raise ValueError("Set CDK context llmBackend to mock, bedrock, or bedrock_agents.")
+        model_arn = (
+            f"arn:{self.partition}:bedrock:{self.region}::foundation-model/{bedrock_model_id}"
         )
         project_root = Path(__file__).resolve().parents[1]
         source = lambda_.Code.from_asset(
@@ -99,6 +111,7 @@ class ChainMindStack(Stack):
                 description=description,
                 environment={
                     "CHAINMIND_MODE": chainmind_mode,
+                    "CHAINMIND_LLM_BACKEND": llm_backend,
                     "CHAINMIND_AWS_REGION": self.region,
                     "CHAINMIND_BEDROCK_MODEL_ID": bedrock_model_id,
                     "CHAINMIND_EVENT_TABLE_NAME": event_store.table_name,
@@ -157,10 +170,136 @@ class ChainMindStack(Stack):
         event_store.grant_read_write_data(api_handler)
         artifacts.grant_put(api_handler, "runs/*")
 
-        # Least-privilege Bedrock access for AWS-mode use; mocks remain the deploy default.
-        model_arn = (
-            f"arn:{self.partition}:bedrock:{self.region}::foundation-model/{bedrock_model_id}"
+        # Phase 3 action-group Lambda calls the existing deterministic agent and SAP adapters.
+        action_group_handler = make_function(
+            "BedrockActionGroupHandler",
+            "chainmind.handlers.action_groups.handler",
+            "Validate and dispatch Bedrock Agent actions to deterministic ChainMind logic.",
         )
+
+        # Bedrock Agents can invoke only the configured model through this service role.
+        agent_role = iam.Role(
+            self,
+            "BedrockAgentServiceRole",
+            assumed_by=iam.ServicePrincipal("bedrock.amazonaws.com"),
+        )
+        agent_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+                resources=[model_arn],
+            )
+        )
+
+        # Shared guardrail blocks personal identifiers and topics outside supply-chain work.
+        guardrail = bedrock.CfnGuardrail(
+            self,
+            "ChainMindSupplyChainGuardrail",
+            name="chainmind-supply-chain-guardrail",
+            description="Protects manufacturing supply-chain agent interactions.",
+            blocked_input_messaging="This request is outside the supported supply-chain scope.",
+            blocked_outputs_messaging="This response is outside the supported supply-chain scope.",
+            sensitive_information_policy_config=bedrock.CfnGuardrail.SensitiveInformationPolicyConfigProperty(
+                pii_entities_config=[
+                    bedrock.CfnGuardrail.PiiEntityConfigProperty(
+                        action="ANONYMIZE",
+                        type=entity_type,
+                    )
+                    for entity_type in ("EMAIL", "PHONE", "NAME", "ADDRESS")
+                ]
+            ),
+            topic_policy_config=bedrock.CfnGuardrail.TopicPolicyConfigProperty(
+                topics_config=[
+                    bedrock.CfnGuardrail.TopicConfigProperty(
+                        name="Out-of-scope requests",
+                        definition=(
+                            "Requests unrelated to manufacturing operations, supply-chain "
+                            "disruptions, inventory, logistics, procurement, or human approval."
+                        ),
+                        type="DENY",
+                        examples=["Write a personal essay unrelated to supply chains."],
+                    )
+                ]
+            ),
+        )
+
+        prompt_names = {
+            "Monitoring": "monitoring",
+            "Logistics": "logistics",
+            "Procurement": "procurement",
+            "Orchestrator": "orchestrator",
+        }
+        schema_by_agent = {
+            "Monitoring": ["get_inventory", "compute_coverage"],
+            "Logistics": ["get_inventory", "compute_coverage"],
+            "Procurement": ["search_alternative_vendors", "compare_vendors"],
+            "Orchestrator": ["create_draft_po"],
+        }
+        agent_aliases: dict[str, bedrock.CfnAgentAlias] = {}
+        for stage_name, prompt_name in prompt_names.items():
+            action_groups = []
+            for action_name in schema_by_agent[stage_name]:
+                schema = (project_root / "infra" / "schemas" / f"{action_name}.yaml").read_text(
+                    encoding="utf-8"
+                )
+                action_groups.append(
+                    bedrock.CfnAgent.AgentActionGroupProperty(
+                        action_group_name=f"{action_name}-action",
+                        description=f"Deterministic {action_name.replace('_', ' ')} operation.",
+                        action_group_executor=bedrock.CfnAgent.ActionGroupExecutorProperty(
+                            lambda_=action_group_handler.function_arn
+                        ),
+                        api_schema=bedrock.CfnAgent.APISchemaProperty(payload=schema),
+                    )
+                )
+            agent = bedrock.CfnAgent(
+                self,
+                f"{stage_name}BedrockAgent",
+                agent_name=f"chainmind-{stage_name.lower()}",
+                description=f"ChainMind {stage_name.lower()} agent.",
+                foundation_model=bedrock_model_id,
+                instruction=(
+                    project_root / "src" / "chainmind" / "prompts" / f"{prompt_name}.md"
+                ).read_text(encoding="utf-8"),
+                agent_resource_role_arn=agent_role.role_arn,
+                action_groups=action_groups,
+                guardrail_configuration=bedrock.CfnAgent.GuardrailConfigurationProperty(
+                    guardrail_identifier=guardrail.attr_guardrail_id,
+                    guardrail_version="DRAFT",
+                ),
+                auto_prepare=True,
+            )
+            alias = bedrock.CfnAgentAlias(
+                self,
+                f"{stage_name}BedrockAgentAlias",
+                agent_id=agent.attr_agent_id,
+                agent_alias_name="chainmind-live",
+                description=f"Prepared alias for the ChainMind {stage_name.lower()} agent.",
+            )
+            agent_aliases[stage_name] = alias
+            action_group_handler.add_permission(
+                f"Allow{stage_name}BedrockAgentInvoke",
+                principal=iam.ServicePrincipal("bedrock.amazonaws.com"),
+                source_account=self.account,
+                source_arn=agent.attr_agent_arn,
+            )
+
+        # The orchestrator may invoke only its prepared alias, never select or price vendors.
+        orchestrator.add_environment(
+            "CHAINMIND_BEDROCK_AGENT_ID",
+            agent_aliases["Orchestrator"].agent_id,
+        )
+        orchestrator.add_environment(
+            "CHAINMIND_BEDROCK_AGENT_ALIAS_ID",
+            agent_aliases["Orchestrator"].attr_agent_alias_id,
+        )
+        orchestrator.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:InvokeAgent"],
+                resources=[agent_aliases["Orchestrator"].attr_agent_alias_arn],
+            )
+        )
+
+        # Least-privilege Bedrock access for AWS-mode use; mocks remain the deploy default.
         orchestrator.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel"],

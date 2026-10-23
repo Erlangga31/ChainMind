@@ -2,9 +2,10 @@
 
 import pytest
 
+from chainmind import factory
 from chainmind.core.config import Settings
 from chainmind.core.errors import IntegrationError
-from chainmind.factory import create_sap_clients
+from chainmind.factory import create_llm_client, create_sap_clients
 from chainmind.integrations.sap.mock_ariba import MockAribaClient
 from chainmind.integrations.sap.mock_s4hana import MockSAPS4HANAClient
 from chainmind.integrations.sap.real_clients import (
@@ -55,3 +56,25 @@ def test_explicit_backend_overrides_legacy_mode() -> None:
 
     assert settings.resolved_sap_backend == "sandbox"
     assert settings.resolved_llm_backend == "mock"
+
+
+def test_bedrock_agents_backend_uses_configured_agent_and_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested: list[tuple[str, str, str]] = []
+
+    class FakeAgentsClient:
+        def __init__(self, agent_id: str, alias_id: str, region: str) -> None:
+            requested.append((agent_id, alias_id, region))
+
+    monkeypatch.setattr(factory, "BedrockAgentsClient", FakeAgentsClient)
+    create_llm_client(
+        Settings(
+            llm_backend="bedrock_agents",
+            bedrock_agent_id="agent-123",
+            bedrock_agent_alias_id="alias-456",
+            aws_region="us-west-2",
+        )
+    )
+    assert requested == [("agent-123", "alias-456", "us-west-2")]
+    assert requested == [("agent-123", "alias-456", "us-west-2")]

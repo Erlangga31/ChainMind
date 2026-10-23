@@ -96,6 +96,23 @@ class VendorEvaluation(DomainModel):
     rationale: str
 
 
+class ReasoningTraceStep(DomainModel):
+    """One attributed reasoning or evidence item for the run timeline."""
+
+    source: str
+    text: str = Field(min_length=1)
+
+
+class LLMExplanation(DomainModel):
+    """Validated explanation and provider trace returned by a language adapter."""
+
+    text: str = Field(min_length=1)
+    trace: list[ReasoningTraceStep] = Field(default_factory=list)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    fallback_used: bool = False
+    fallback_reason: str | None = None
+
+
 class AgentResult(DomainModel):
     """Typed result produced by each agent stage."""
 
@@ -132,6 +149,9 @@ class OrchestratorResult(AgentResult):
 
     selected_vendor: VendorEvaluation
     cost_of_inaction: float
+    trace: list[ReasoningTraceStep] = Field(default_factory=list)
+    fallback_used: bool = False
+    fallback_reason: str | None = None
 
 
 class AuditEntry(DomainModel):
@@ -182,6 +202,7 @@ class DisruptionRun(DomainModel):
     vendor_comparison: list[VendorEvaluation] = Field(default_factory=list)
     selected_vendor_id: str | None = None
     chain_of_thought: list[str] = Field(default_factory=list)
+    trace_steps: list[ReasoningTraceStep] = Field(default_factory=list)
     draft_po: PurchaseOrder | None = None
     workflow_task_id: str | None = None
     last_decision: DecisionRequest | None = None
