@@ -85,7 +85,7 @@ Stack CDK mendefinisikan service AWS dan callback wait. API keputusan pada jalur
 | Agent AI | `LLMClient`, `MockLLMClient` offline, `BedrockLLMClient` opsional |
 | Integrasi SAP | Kontrak `SAPClient`/`AribaClient`, mock S/4HANA dan Ariba, stub SAP Integration Suite |
 | Workflow dan IaC | AWS Lambda, EventBridge, Step Functions, API Gateway, S3, AWS CDK for Python |
-| Dashboard | React, TypeScript, Vite, Tailwind CSS |
+| Dashboard | React, TypeScript, Vite, Tailwind CSS, Recharts, Vitest |
 | Validasi kualitas | pytest, Ruff, GitHub Actions |
 
 ## Quick start
@@ -113,7 +113,9 @@ npm ci
 npm run dev
 ```
 
-Buka alamat Vite (umumnya `http://localhost:5173`), lalu pilih **Trigger demo disruption**. Dashboard menampilkan run, linimasa tujuh tahap, perbandingan vendor, ringkasan rationale, draf PO, kontrol approve/reject/revise, dan hasil tracking/KPI ilustratif setelah approval.
+Buka alamat Vite (umumnya `http://localhost:5173`), pilih skenario, lalu klik **Trigger demo disruption**. Dashboard menampilkan linimasa enam tahap, dampak stok, tabel serta grafik vendor, trace per sumber, audit log, draf PO dengan dialog konfirmasi, tracking dan halaman KPI ilustratif. Role switch Viewer/Approver adalah simulasi UI untuk demo lokal; header role bukan autentikasi produksi dan tidak boleh digunakan sebagai kontrol keamanan di deployment.
+
+Jalankan tes dan build dashboard dengan `npm test` dan `npm run build` dari folder `dashboard`.
 
 ### Tes, lint, dan sintesis infrastruktur
 

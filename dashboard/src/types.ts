@@ -56,11 +56,27 @@ export interface DisruptionRun {
     title: string;
     component_name: string;
     delay_days: number;
+    event_type: string | null;
   };
   stages: Stage[];
   vendor_comparison: VendorEvaluation[];
+  trace_steps: { source: string; text: string }[];
   selected_vendor_id: string | null;
   chain_of_thought: string[];
+  inventory_snapshot: {
+    current_stock: number;
+    daily_consumption: number;
+    line_stoppage_cost_per_day: number;
+    purchase_quantity: number;
+  } | null;
+  cost_of_inaction: number;
+  audit_log: {
+    timestamp: string;
+    agent: string;
+    input_summary: string;
+    output_summary: string;
+    reasoning: string;
+  }[];
   draft_po: PurchaseOrder | null;
   execution_tracking: {
     sap_reference: string;
