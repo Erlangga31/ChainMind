@@ -1,10 +1,19 @@
 """End-to-end seeded scenario and human approval boundary tests."""
 
 from importlib.resources import files
+from uuid import uuid4
+
+import pytest
 
 from chainmind.core.config import Settings
 from chainmind.core.events import EventStore
-from chainmind.core.models import DecisionRequest, DecisionType, DisruptionEvent, RunStatus
+from chainmind.core.models import (
+    DecisionRequest,
+    DecisionType,
+    DisruptionEvent,
+    DisruptionType,
+    RunStatus,
+)
 from chainmind.factory import create_pipeline
 from chainmind.integrations.sap.mock_s4hana import MockSAPS4HANAClient
 
@@ -71,6 +80,29 @@ def test_approval_is_the_only_path_that_executes_the_purchase_order() -> None:
         in next(stage for stage in approved_run.stages if stage.name == "PO execution").summary
     )
     assert approved_run.stages[-1].status == "COMPLETED"
+
+
+@pytest.mark.parametrize("event_type", list(DisruptionType))
+def test_all_disruption_scenarios_keep_vendor_b_approval_and_tracking_flow(
+    event_type: DisruptionType,
+) -> None:
+    pipeline = create_pipeline(Settings(mode="mock"), EventStore())
+    event = seeded_event().model_copy(update={"event_id": uuid4(), "event_type": event_type})
+
+    run = pipeline.run(event)
+
+    assert run.selected_vendor_id == "vendor-b"
+    assert run.draft_po is not None
+    assert run.draft_po.total_price == 135_000
+    assert run.status == RunStatus.PENDING_APPROVAL
+
+    pipeline.decide(run.run_id, DecisionRequest(decision=DecisionType.APPROVE))
+    completed = pipeline.get_run(run.run_id)
+
+    assert completed.status == RunStatus.EXECUTED
+    assert completed.execution_tracking is not None
+    assert completed.execution_tracking.shipment.status == "IN_TRANSIT"
+    assert completed.stages[-1].status == "COMPLETED"
 
 
 def test_revision_replaces_draft_and_still_requires_approval() -> None:

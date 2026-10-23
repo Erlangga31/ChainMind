@@ -1,6 +1,15 @@
 # Skrip demo ChainMind untuk juri
 
-Durasi yang disarankan: **4–6 menit**. Demo berjalan offline dengan adapter mock; gunakan hanya data fixture yang disediakan.
+Durasi yang disarankan: **5 menit**. Demo berjalan offline dengan adapter mock; gunakan hanya data fixture yang disediakan.
+
+| Waktu | Fokus |
+| --- | --- |
+| 0:00–0:45 | Gangguan cuaca, coverage stok, dan severity |
+| 0:45–1:45 | Linimasa enam tahap, impact panel, dan perbandingan vendor |
+| 1:45–2:30 | Chain of Thought trace, source labels, dan draft PO |
+| 2:30–3:30 | Viewer/Approver demo, revise/reject atau konfirmasi approve |
+| 3:30–4:30 | Eksekusi mock, konfirmasi Ariba, ASN, ETA, dan tracking |
+| 4:30–5:00 | KPI ilustratif, batas verifikasi, dan langkah produksi |
 
 ## Persiapan sebelum presentasi
 
@@ -23,7 +32,7 @@ Durasi yang disarankan: **4–6 menit**. Demo berjalan offline dengan adapter mo
 9. Ubah role ke **Approver**, masukkan catatan lalu tekan **Revise vendor**, pilih Vendor A, dan konfirmasi pada dialog. Draf berubah, catatan revisi tercatat, tetapi status tetap `PENDING_APPROVAL`.
 10. Pilih apakah ingin **Reject** untuk membuktikan tidak ada eksekusi, atau **Review approval** lalu centang konfirmasi eksplisit untuk memperlihatkan jalur persetujuan pada mock SAP. Approval menghasilkan nomor referensi mock dan audit entry manusia.
 11. Setelah approval, tunjukkan tahap **Execution & tracking**: Ariba mengonfirmasi 5.000 pcs, ASN menampilkan ETA vendor 2 hari, dan proyeksi terpisah menunjukkan 6.000 pcs/6 hari cakupan saat barang tiba. Jelaskan bahwa angka ini simulasi dan tidak mengubah saldo stok SAP saat ini.
-12. Tampilkan KPI biaya inaction, biaya aksi, dan savings ilustratif; endpoint `GET /kpis` hanya mengagregasi run yang selesai tracking dan bukan proyeksi finansial.
+12. Tampilkan KPI biaya inaction, biaya aksi, dan savings ilustratif; endpoint `GET /kpis` hanya mengagregasi run yang selesai tracking dan bukan proyeksi finansial. CloudWatch dashboard hanya tersedia setelah stack AWS dideploy; demo lokal tidak mengklaim akses CloudWatch.
 13. Tunjukkan notifikasi console untuk draft dan signed links. Tekankan bahwa membuka approve link tidak mengeksekusi PO; API tetap meminta role approver dan konfirmasi eksplisit. Pengingat overdue berjalan melalui pemeriksaan berkala; jangan menunggu ambang 24 jam saat demo.
 
 ## Rationale fixture demo

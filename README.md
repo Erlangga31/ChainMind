@@ -74,7 +74,9 @@ Sandbox SAP lokal pada `sandbox/sap_sandbox/` menyediakan endpoint OData, vendor
 
 Event Mesh simulator mengirim event ke `/event-bridge` dengan HMAC-SHA256. Untuk menjalankan kedua proses lokal, isi `CHAINMIND_EVENT_BRIDGE_SECRET` dan `SAP_SANDBOX_EVENT_BRIDGE_SECRET` dengan shared secret yang sama dan non-empty. `OpenMeteoWeatherClient` adalah integrasi opsional yang disabled by default; sumber gangguan lain memakai skenario mock offline.
 
-Stack CDK mendefinisikan service AWS dan callback wait. API keputusan pada jalur AWS melanjutkan callback Step Functions; integrasi SAP nyata, otorisasi identitas produksi, dan verifikasi runtime AWS tetap memerlukan konfigurasi/deployment tersendiri.
+Stack CDK mendefinisikan service AWS dan callback wait. API keputusan pada jalur AWS melanjutkan callback Step Functions; Cognito authorizer dan group role tersedia sebagai scaffold. Dashboard browser masih memakai role selector mock, sehingga OAuth/Cognito sign-in belum terhubung dan stack belum siap dipakai sebagai deployment produksi.
+
+CDK scaffold kini mencakup KMS, VPC/private subnets dan VPC endpoints, Cognito groups dan authorizer, API throttling/access logs, CloudTrail, alarms, serta dashboard CloudWatch. Run snapshots dan audit/trace artifact diarsipkan ke S3 pada AWS mode. Sintesis template bukan bukti bahwa Lambda siap deploy atau bahwa integrasi AWS/SAP sudah berjalan; lihat [docs/DEPLOY.md](./docs/DEPLOY.md) sebelum mempertimbangkan deployment.
 
 ## Tech stack
 
@@ -113,9 +115,22 @@ npm ci
 npm run dev
 ```
 
-Buka alamat Vite (umumnya `http://localhost:5173`), pilih skenario, lalu klik **Trigger demo disruption**. Dashboard menampilkan linimasa enam tahap, dampak stok, tabel serta grafik vendor, trace per sumber, audit log, draf PO dengan dialog konfirmasi, tracking dan halaman KPI ilustratif. Role switch Viewer/Approver adalah simulasi UI untuk demo lokal; header role bukan autentikasi produksi dan tidak boleh digunakan sebagai kontrol keamanan di deployment.
+Buka alamat Vite (umumnya `http://localhost:5173`), pilih skenario, lalu klik **Trigger demo disruption**. Dashboard menampilkan linimasa enam tahap, dampak stok, tabel serta grafik vendor, trace per sumber, audit log, draf PO dengan dialog konfirmasi, tracking dan halaman KPI ilustratif. Role switch Viewer/Approver adalah simulasi UI untuk demo lokal; default-nya Viewer dan pilihan tersimpan di `sessionStorage`. Header role bukan autentikasi produksi dan tidak boleh digunakan sebagai kontrol keamanan di deployment.
 
 Jalankan tes dan build dashboard dengan `npm test` dan `npm run build` dari folder `dashboard`.
+
+### Semua layanan lokal dengan Docker Compose
+
+Dengan Docker Engine dan Docker Compose tersedia, jalankan dari root:
+
+```powershell
+docker compose up --build
+```
+
+atau gunakan `make run-all`. API, SAP sandbox, dan dashboard tersedia masing-masing di
+`http://localhost:8000`, `http://localhost:8100`, dan `http://localhost:5173`.
+Konfigurasi Compose memakai shared/signing secret demo lokal saja; jangan gunakan nilainya
+di deployment. Hentikan layanan dengan `docker compose down` atau `make down`.
 
 ### Tes, lint, dan sintesis infrastruktur
 
@@ -184,7 +199,7 @@ Salin `.env.example` ke `.env` bila ingin mengubah konfigurasi lokal. `.env` tid
 
 AWS credentials tidak dimasukkan ke berkas konfigurasi proyek: boto3 menggunakan AWS credential chain standar.
 Gunakan kredensial dummy hanya untuk SAP sandbox lokal. Backend `real` belum diverifikasi terhadap tenant SAP asli.
-Header `X-ChainMind-Role` dipakai sebagai role demo pada API lokal (dashboard memakai peran `approver` secara default dan menerima `viewer` dari `sessionStorage`). Header ini bukan autentikasi produksi; deployment perlu authorizer yang menerbitkan role terverifikasi.
+Header `X-ChainMind-Role` dipakai sebagai role demo pada API lokal (dashboard default ke `viewer`; role `approver` dipilih eksplisit). Header ini bukan autentikasi produksi. CDK menambahkan Cognito authorizer dan meneruskan group claim terverifikasi, tetapi OAuth/PKCE dashboard belum terhubung.
 
 ### SAP sandbox lokal
 
@@ -226,8 +241,9 @@ chainmind/
 - [ ] Validasi custom API tracking dan seluruh mapping OData pada tenant SAP Integration Suite/Ariba yang nyata.
 - [ ] Paketkan dependency Python untuk Lambda deployment dan verifikasi runtime Python 3.12.
 - [x] Hubungkan endpoint approval ke callback token Step Functions (`SendTaskSuccess`/`SendTaskFailure`) dan tambahkan idempotensi.
-- [ ] Terapkan identity provider, otorisasi approver berbasis peran, dan secret management AWS Secrets Manager.
-- [ ] Perkuat retensi, audit log, observability, alarm, dan pengujian integrasi dengan SAP sandbox.
+- [x] Tambahkan Cognito authorizer/group scaffold, KMS, private VPC endpoints, CloudTrail, audit archive, retention, alarms, dan CloudWatch dashboard (synth-only).
+- [ ] Hubungkan dashboard ke OAuth/PKCE dan uji akses viewer/approver Cognito end-to-end.
+- [ ] Jalankan cdk-nag, selesaikan Lambda runtime dependency packaging, dan review security findings.
 - [ ] Uji deduplikasi serentak, rotasi HMAC, dan alur event end-to-end dalam akun AWS.
 
 **Disclaimer MVP:** integrasi SAP saat ini adalah mock/stub; seed data, event store mock, dan keputusan human-in-the-loop lokal dimaksudkan untuk demo. AWS CDK adalah scaffold yang dapat disintesis, bukan deployment atau sertifikasi kesiapan produksi.
@@ -237,6 +253,26 @@ sedangkan SES hanya dipanggil pada AWS mode. Link tindakan bertanda tangan dan k
 mengeksekusi PO melalui GET: link approval memerlukan role `approver` serta konfirmasi eksplisit.
 Pengingat lokal diperiksa lewat `pipeline.check_approval_overdue`; CDK menjalankan pemeriksaan
 terjadwal dan menyediakan timeout Step Functions sebagai eskalasi cadangan.
+
+## Proposal coverage matrix
+
+PDF proposal belum tersedia di `docs/reference/`; status berikut berasal dari requirements tertulis dan belum dibandingkan dengan dokumen sumber.
+
+| Section prompt | Status | Bukti | Verifikasi |
+| --- | --- | --- | --- |
+| 3 — konsep dan skenario | Partially | [demo pipeline](./tests/test_demo_pipeline.py), [seed data](./src/chainmind/data/) | unit-tested |
+| 5 — agent dan action groups | Partially | [agents](./src/chainmind/agents/), [CDK stack](./infra/chainmind_stack.py) | unit-tested, synth-only |
+| 6 — workflow dan approval | Partially | [workflow](./src/chainmind/workflow/), [approval handler](./src/chainmind/handlers/approval.py) | unit-tested, synth-only |
+| 7 — SAP/Ariba | Partially | [SAP sandbox](./sandbox/sap_sandbox/), [SAP clients](./src/chainmind/integrations/sap/) | sandbox-verified; needs real SAP |
+| 8 — notifikasi | Partially | [notification adapters](./src/chainmind/notifications/), [tests](./tests/test_notifications.py) | unit-tested; live channels need real accounts |
+| 9 — security/operations | Partially | [CDK stack](./infra/chainmind_stack.py), [deployment notes](./docs/DEPLOY.md) | synth-only; no deployment/security certification |
+| 10 — dashboard/demo | Partially | [dashboard](./dashboard/src/), [demo guide](./docs/DEMO.md) | unit-tested, build; mock roles only |
+| 11 — business model | Partially | [business draft](./docs/BUSINESS.md) | documentation-only, assumptions TBD |
+| 12 — KPI framework | Partially | [KPI API](./src/chainmind/api/main.py), [KPI models](./src/chainmind/core/models.py) | unit-tested; illustrative only |
+| 13 — proposal-specific item | Not implemented | [coverage limitations](./docs/COVERAGE.md) | needs proposal PDF |
+| 15 — risk | Partially | [risk register draft](./docs/BUSINESS.md) | prompt-derived, not formally reviewed |
+
+Lihat [docs/COVERAGE.md](./docs/COVERAGE.md) untuk audit prompt-derived yang lebih rinci dan [docs/BUSINESS.md](./docs/BUSINESS.md) untuk hipotesis bisnis.
 
 ## Kontribusi
 

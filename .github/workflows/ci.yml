@@ -65,6 +65,15 @@ jobs:
         run: npm audit --audit-level=moderate
         working-directory: dashboard
 
+  compose:
+    name: Local demo stack
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Validate Docker Compose configuration
+        run: docker compose config --quiet
+
   infra:
     name: Infrastructure synthesis
     runs-on: ubuntu-latest
