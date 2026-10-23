@@ -183,6 +183,8 @@ class DisruptionRun(DomainModel):
     selected_vendor_id: str | None = None
     chain_of_thought: list[str] = Field(default_factory=list)
     draft_po: PurchaseOrder | None = None
+    workflow_task_id: str | None = None
+    last_decision: DecisionRequest | None = None
     audit_log: list[AuditEntry] = Field(default_factory=list)
     error: str | None = None
     revision_note: str | None = None

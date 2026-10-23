@@ -49,6 +49,12 @@ and purchase-order routes, seeded Ariba vendors, an Event Mesh webhook simulator
 Workflow approval callback simulator. It uses the same inventory and vendor seed fixtures as the
 application. These routes are local contract-test fixtures, not production SAP integrations.
 
+`RealS4HANAClient` and `RealAribaClient` use the Integration Suite HTTP abstraction with OAuth
+client-credentials tokens, cached tokens, CSRF-protected writes, typed response mapping, request
+timeouts, and bounded retries. Contract tests execute these adapters against the local sandbox.
+This validates HTTP behavior against the simulator only; SAP tenant authorization, CSRF, API
+versions, proxy setup, and service-specific field mapping require verification against SAP.
+
 The `core` package contains Pydantic domain models, agent decisions, audit entries, and the sequential workflow. FastAPI, Lambda, boto3-backed storage, Bedrock, and SAP are adapters around that logic. The orchestration calculation is deterministic; the LLM client explains the result and does not choose or override the winning vendor.
 
 ## Decision economics

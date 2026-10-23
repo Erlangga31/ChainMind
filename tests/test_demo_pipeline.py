@@ -76,3 +76,26 @@ def test_revision_replaces_draft_and_still_requires_approval() -> None:
     assert result.draft_po.po_id != original_po_id
     assert result.draft_po.status == "PENDING_APPROVAL"
     assert "retained at a human's request" in pipeline.get_run(run.run_id).chain_of_thought[-1]
+
+
+def test_revision_updates_existing_workflow_task_idempotently() -> None:
+    pipeline = create_pipeline(Settings(mode="mock"), EventStore())
+    run = pipeline.run(seeded_event())
+    assert run.workflow_task_id is not None
+    revision = DecisionRequest(
+        decision=DecisionType.REVISE,
+        vendor_id="vendor-a",
+        note="Use the alternate supplier.",
+    )
+
+    first = pipeline.decide(run.run_id, revision)
+    duplicate = pipeline.decide(run.run_id, revision)
+    workflow = pipeline._workflow
+
+    assert first.draft_po is not None
+    assert duplicate.draft_po is not None
+    assert duplicate.draft_po.po_id == first.draft_po.po_id
+    task = workflow.task_for_run(str(run.run_id))
+    assert task is not None
+    assert task["po_id"] == str(first.draft_po.po_id)
+    assert task["status"] == "PENDING"

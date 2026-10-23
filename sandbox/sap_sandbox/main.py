@@ -24,8 +24,10 @@ from sap_sandbox.models import (
     MaterialStock,
     PurchaseOrderStatusPatch,
     WorkflowDecisionRequest,
+    WorkflowDraftUpdate,
     WorkflowTaskRequest,
 )
+from starlette.responses import Response
 from starlette.status import HTTP_400_BAD_REQUEST, HTTP_409_CONFLICT, HTTP_502_BAD_GATEWAY
 
 from chainmind.core.models import DisruptionEvent, PurchaseOrder, Vendor
@@ -163,6 +165,37 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
     vendors = load_vendors()
     app = FastAPI(title="ChainMind Local SAP Sandbox", version="0.1.0")
     app.state.sandbox = state
+    app.state.csrf_token = secrets.token_urlsafe(24)
+
+    @app.middleware("http")
+    async def csrf_middleware(request: Request, call_next: Any) -> Response:
+        """Issue CSRF tokens and enforce them for simulated OData writes."""
+
+        is_purchase_order = request.url.path.startswith(ODATA_PO_PATH)
+        method = request.method.upper()
+        if is_purchase_order and method in {"POST", "PATCH"}:
+            supplied = request.headers.get("X-CSRF-Token", "")
+            if not secrets.compare_digest(supplied, app.state.csrf_token):
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "error": {
+                            "code": "csrf_token_required",
+                            "message": {
+                                "lang": "en",
+                                "value": "A valid X-CSRF-Token header is required.",
+                            },
+                        }
+                    },
+                )
+        response = await call_next(request)
+        if (
+            is_purchase_order
+            and method == "GET"
+            and request.headers.get("X-CSRF-Token", "").lower() == "fetch"
+        ):
+            response.headers["X-CSRF-Token"] = app.state.csrf_token
+        return response
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(
@@ -351,6 +384,8 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
         if order is None:
             return odata_error("404", "Purchase order was not found.", 404)
         order.status = update.status
+        if update.status == "EXECUTED":
+            order.sap_reference = f"MOCK-PO-{order.po_id.hex[:8].upper()}"
         return {"d": order.model_dump(mode="json")}
 
     @app.get("/ariba/sourcing/vendors", response_model=None)
@@ -525,6 +560,62 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
             )
         return task.as_dict()
 
+    @app.post("/workflow/tasks/{task_id}/sync", response_model=None)
+    async def sync_workflow_decision(
+        task_id: str,
+        decision: WorkflowDecisionRequest,
+    ) -> dict[str, Any] | JSONResponse:
+        """Synchronize a ChainMind decision without calling the run callback."""
+
+        async with state.workflow_lock:
+            task = state.workflow_tasks.get(task_id)
+            if task is None:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": {"code": "task_not_found", "message": task_id}},
+                )
+            if task.decision is not None and task.decision != decision.decision:
+                return JSONResponse(
+                    status_code=HTTP_409_CONFLICT,
+                    content={
+                        "error": {
+                            "code": "decision_conflict",
+                            "message": "The workflow task already has a different decision.",
+                        }
+                    },
+                )
+            task.status = "APPROVED" if decision.decision == "approve" else "REJECTED"
+            task.decision = decision.decision
+            task.note = decision.note
+            return task.as_dict()
+
+    @app.patch("/workflow/tasks/{task_id}/draft", response_model=None)
+    async def update_workflow_draft(
+        task_id: str,
+        update: WorkflowDraftUpdate,
+    ) -> dict[str, Any] | JSONResponse:
+        """Associate a revised purchase-order draft with the pending task."""
+
+        async with state.workflow_lock:
+            task = state.workflow_tasks.get(task_id)
+            if task is None:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": {"code": "task_not_found", "message": task_id}},
+                )
+            if task.decision is not None:
+                return JSONResponse(
+                    status_code=HTTP_409_CONFLICT,
+                    content={
+                        "error": {
+                            "code": "decision_already_recorded",
+                            "message": "The workflow task already has a decision.",
+                        }
+                    },
+                )
+            task.po_id = update.po_id
+            return task.as_dict()
+
     @app.post("/workflow/tasks/{task_id}/decision", response_model=None)
     async def decide_workflow_task(
         task_id: str,
@@ -551,6 +642,9 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
                         },
                     )
                 return task.as_dict()
+            task.status = "APPROVED" if decision.decision == "approve" else "REJECTED"
+            task.decision = decision.decision
+            task.note = decision.note
             callback_url = (
                 f"{sandbox_settings.workflow_callback_url.rstrip('/')}/runs/{task.run_id}/decision"
             )
@@ -558,22 +652,23 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
                 "decision": decision.decision,
                 "note": decision.note,
             }
-            try:
-                await post_webhook(callback_url, callback_payload)
-            except httpx.HTTPError:
-                return JSONResponse(
-                    status_code=HTTP_502_BAD_GATEWAY,
-                    content={
-                        "error": {
-                            "code": "workflow_callback_failed",
-                            "message": "The configured workflow callback could not be reached.",
-                        }
-                    },
-                )
-            task.status = "APPROVED" if decision.decision == "approve" else "REJECTED"
-            task.decision = decision.decision
-            task.note = decision.note
-            return task.as_dict()
+        try:
+            await post_webhook(callback_url, callback_payload)
+        except httpx.HTTPError:
+            async with state.workflow_lock:
+                task.status = "PENDING"
+                task.decision = None
+                task.note = ""
+            return JSONResponse(
+                status_code=HTTP_502_BAD_GATEWAY,
+                content={
+                    "error": {
+                        "code": "workflow_callback_failed",
+                        "message": "The configured workflow callback could not be reached.",
+                    }
+                },
+            )
+        return task.as_dict()
 
     return app
 

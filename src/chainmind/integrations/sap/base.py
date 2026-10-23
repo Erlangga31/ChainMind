@@ -23,3 +23,16 @@ class AribaClient(Protocol):
 
     def list_alternative_vendors(self, event: DisruptionEvent) -> list[Vendor]:
         """Return supplier quotes relevant to the disrupted component."""
+
+
+class ApprovalWorkflowClient(Protocol):
+    """Operations against an external approval workflow."""
+
+    def create_task(self, run_id: str, po_id: str) -> str:
+        """Create or retrieve an idempotent approval task."""
+
+    def update_draft(self, task_id: str, po_id: str) -> None:
+        """Associate a revised draft with the existing approval task."""
+
+    def record_decision(self, task_id: str, decision: str, note: str) -> None:
+        """Synchronize a decision made through the ChainMind dashboard."""

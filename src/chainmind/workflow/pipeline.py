@@ -26,7 +26,8 @@ from chainmind.core.models import (
 )
 from chainmind.core.retry import retry_integration_call
 from chainmind.integrations.llm.base import LLMClient
-from chainmind.integrations.sap.base import AribaClient, SAPClient
+from chainmind.integrations.sap.base import ApprovalWorkflowClient, AribaClient, SAPClient
+from chainmind.integrations.sap.real_clients import InMemoryApprovalWorkflowClient
 
 
 class DisruptionPipeline:
@@ -40,12 +41,14 @@ class DisruptionPipeline:
         llm: LLMClient,
         settings: Settings,
         store: RunStore | None = None,
+        workflow_client: ApprovalWorkflowClient | None = None,
     ) -> None:
         self._sap = sap
         self._ariba = ariba
         self._llm = llm
         self._settings = settings
         self._store = store or EventStore()
+        self._workflow = workflow_client or InMemoryApprovalWorkflowClient()
         self._monitoring = MonitoringAgent()
         self._logistics = LogisticsAgent()
         self._procurement = ProcurementAgent(ariba, settings)
@@ -145,8 +148,10 @@ class DisruptionPipeline:
                 attempts=self._settings.retry_attempts,
                 base_delay_seconds=self._settings.retry_base_delay_seconds,
             )
+            workflow_task_id = self._workflow.create_task(str(run.run_id), str(draft.po_id))
             run.selected_vendor_id = orchestration.selected_vendor.vendor.vendor_id
             run.draft_po = draft
+            run.workflow_task_id = workflow_task_id
             run.chain_of_thought.append(orchestration.reasoning)
             run.audit_log.append(
                 audit_for(
@@ -162,6 +167,16 @@ class DisruptionPipeline:
                     output_summary=f"Draft PO {draft.po_id} created; not executed.",
                     reasoning=(
                         "A draft is stored for human review; no financial transaction was executed."
+                    ),
+                )
+            )
+            run.audit_log.append(
+                AuditEntry(
+                    agent="sap_business_workflow",
+                    input_summary=f"run_id={run.run_id}; po_id={draft.po_id}",
+                    output_summary=f"Approval task {workflow_task_id} created.",
+                    reasoning=(
+                        "The draft is linked to a human approval task; it remains unexecuted."
                     ),
                 )
             )
@@ -223,6 +238,20 @@ class DisruptionPipeline:
         """Record approval, rejection, or a human-selected vendor revision."""
 
         run = self.get_run(run_id)
+        if run.last_decision == decision and run.status != RunStatus.PENDING_APPROVAL:
+            return DecisionResult(
+                run_id=run.run_id,
+                status=run.status,
+                message="This decision was already recorded.",
+                draft_po=run.draft_po,
+            )
+        if run.last_decision == decision and run.status == RunStatus.PENDING_APPROVAL:
+            return DecisionResult(
+                run_id=run.run_id,
+                status=run.status,
+                message="This revision was already recorded; the draft remains pending approval.",
+                draft_po=run.draft_po,
+            )
         if run.status != RunStatus.PENDING_APPROVAL or run.draft_po is None:
             raise ChainMindError(
                 "decision_not_allowed",
@@ -233,8 +262,15 @@ class DisruptionPipeline:
         if decision.decision == DecisionType.REVISE:
             return self._revise(run, decision)
         if decision.decision == DecisionType.REJECT:
+            if run.workflow_task_id is not None:
+                self._workflow.record_decision(
+                    run.workflow_task_id,
+                    decision.decision.value,
+                    decision.note,
+                )
             run.status = RunStatus.REJECTED
             run.draft_po.status = "REJECTED"
+            run.last_decision = decision.model_copy(deep=True)
             run.audit_log.append(
                 AuditEntry(
                     agent="human",
@@ -254,6 +290,12 @@ class DisruptionPipeline:
                 draft_po=run.draft_po,
             )
 
+        if run.workflow_task_id is not None:
+            self._workflow.record_decision(
+                run.workflow_task_id,
+                decision.decision.value,
+                decision.note,
+            )
         sap_reference = retry_integration_call(
             lambda: self._sap.execute_purchase_order(run.draft_po),
             attempts=self._settings.retry_attempts,
@@ -262,6 +304,7 @@ class DisruptionPipeline:
         run.status = RunStatus.EXECUTED
         run.draft_po.status = "EXECUTED"
         run.draft_po.sap_reference = sap_reference
+        run.last_decision = decision.model_copy(deep=True)
         run.audit_log.append(
             AuditEntry(
                 agent="human",
@@ -308,8 +351,11 @@ class DisruptionPipeline:
             attempts=self._settings.retry_attempts,
             base_delay_seconds=self._settings.retry_base_delay_seconds,
         )
+        if run.workflow_task_id is not None:
+            self._workflow.update_draft(run.workflow_task_id, str(run.draft_po.po_id))
         run.selected_vendor_id = revised.selected_vendor.vendor.vendor_id
         run.revision_note = decision.note
+        run.last_decision = decision.model_copy(deep=True)
         run.chain_of_thought.append(f"Human-requested revision: {revised.reasoning}")
         run.audit_log.append(
             audit_for(

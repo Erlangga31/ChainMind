@@ -4,8 +4,9 @@ from typing import Any
 
 import httpx
 from fastapi.testclient import TestClient
-from sap_sandbox.config import SandboxSettings
-from sap_sandbox.main import create_app
+
+from sandbox.sap_sandbox.config import SandboxSettings
+from sandbox.sap_sandbox.main import create_app
 
 
 def make_client() -> TestClient:
@@ -69,6 +70,25 @@ def test_odata_invalid_filter_uses_odata_error_format() -> None:
     assert response.json()["error"]["code"] == "400"
 
 
+def test_odata_write_requires_csrf_token() -> None:
+    client = make_client()
+    response = client.post(
+        "/sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrder",
+        json={
+            "vendor_id": "vendor-b",
+            "vendor_name": "Vendor B",
+            "component_id": "microchip-x",
+            "component_name": "Microchip X",
+            "quantity": 5000,
+            "unit_price": 27,
+            "total_price": 135000,
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "csrf_token_required"
+
+
 def test_purchase_order_can_be_created_read_and_patched() -> None:
     client = make_client()
     order = {
@@ -82,10 +102,11 @@ def test_purchase_order_can_be_created_read_and_patched() -> None:
         "terms": "Air Freight",
     }
 
-    created = client.post(
-        "/sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrder",
-        json=order,
-    )
+    po_collection = "/sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrder"
+    csrf_token = client.get(po_collection, headers={"X-CSRF-Token": "Fetch"}).headers[
+        "X-CSRF-Token"
+    ]
+    created = client.post(po_collection, json=order, headers={"X-CSRF-Token": csrf_token})
 
     assert created.status_code == 201
     assert created.json()["d"]["status"] == "PENDING_APPROVAL"
@@ -106,6 +127,7 @@ def test_purchase_order_can_be_created_read_and_patched() -> None:
     patched = client.patch(
         f"/sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrder('{po_id}')",
         json={"status": "APPROVED"},
+        headers={"X-CSRF-Token": csrf_token},
     )
     assert patched.json()["d"]["status"] == "APPROVED"
     assert (
@@ -171,7 +193,7 @@ def test_scenarios_include_weather_geopolitics_supplier_failure_and_congestion()
 def test_event_mesh_injects_scenario_to_configured_webhook(
     monkeypatch: Any,
 ) -> None:
-    import sap_sandbox.main as sandbox_main
+    import sandbox.sap_sandbox.main as sandbox_main
 
     delivered: list[tuple[str, dict[str, Any]]] = []
 
@@ -189,7 +211,7 @@ def test_event_mesh_injects_scenario_to_configured_webhook(
 
 
 def test_event_mesh_reports_webhook_failure(monkeypatch: Any) -> None:
-    import sap_sandbox.main as sandbox_main
+    import sandbox.sap_sandbox.main as sandbox_main
 
     async def fail_webhook(_: str, __: dict[str, Any]) -> None:
         raise httpx.ConnectError("connection refused")
@@ -210,7 +232,7 @@ def test_event_mesh_reports_webhook_failure(monkeypatch: Any) -> None:
 
 
 def test_workflow_task_is_idempotent_and_callback_runs_once(monkeypatch: Any) -> None:
-    import sap_sandbox.main as sandbox_main
+    import sandbox.sap_sandbox.main as sandbox_main
 
     delivered: list[tuple[str, dict[str, Any]]] = []
 
@@ -240,7 +262,7 @@ def test_workflow_task_is_idempotent_and_callback_runs_once(monkeypatch: Any) ->
 
 
 def test_workflow_rejects_conflicting_duplicate_decision(monkeypatch: Any) -> None:
-    import sap_sandbox.main as sandbox_main
+    import sandbox.sap_sandbox.main as sandbox_main
 
     async def capture_webhook(_: str, __: dict[str, Any]) -> None:
         return None
