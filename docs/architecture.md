@@ -46,7 +46,7 @@ For local development the FastAPI route calls the same sequential pipeline used 
 | 2. Logistics | `LogisticsAgent` | Seed stock and consumption | Logistics Lambda; estimates stockout days and line loss |
 | 3. Procurement | `ProcurementAgent` | Seed Ariba quotes | Procurement Lambda; SAP Ariba Network through SAP Integration Suite |
 | 4. Orchestration | `OrchestratorAgent`, `LLMClient` | Deterministic `MockLLMClient` | Four Bedrock Agents, aliases, Lambda action groups, and shared guardrail; model output explains but cannot change Python's selection |
-| Human approval | `DisruptionPipeline.decide` | FastAPI / dashboard | Step Functions callback token (API completion wiring remains a deployment TODO) |
+| Human approval | Shared transition definition, bounded revision count, approver-role check | FastAPI role header for demo only | Step Functions task token; API sends success/failure callbacks, rejection is caught as a non-execution terminal path |
 | PO execution | `SAPClient.execute_purchase_order` | Mock S/4HANA in-memory record | S/4HANA via SAP Integration Suite, only after approval |
 | Run/audit storage | `RunStore` contract | SQLite snapshots and unique idempotency key (configurable, defaults to `data/chainmind-events.sqlite3`) | DynamoDB run records and event-key index; private S3 rationale artifacts |
 
@@ -92,7 +92,8 @@ For the seed scenario, stock covers three days, delay is five days, and the conf
 - `aws` mode selects Bedrock and DynamoDB; the SAP classes intentionally fail with structured errors until a real SAP Integration Suite adapter is configured.
 - Integration calls retry only typed transient integration failures with bounded exponential backoff.
 - Every agent step and human decision appends a UTC audit entry with an input summary, output summary, and human-readable reasoning.
-- The orchestrator creates a draft; it never approves or executes one. The `approve` path alone invokes the SAP execution adapter. Rejection does not execute; revision creates a replacement draft that is still pending.
+- The orchestrator creates a draft; it never approves or executes one. The `approve` path alone invokes the SAP execution adapter. Rejection does not execute; revision creates a replacement draft that is still pending and is capped by `CHAINMIND_MAX_REVISIONS`.
+- The local runner and CDK builder share the workflow-state transition definition. The Step Functions ASL has bounded revision states, task retries, an SQS dead-letter path, and X-Ray tracing. Its AWS runtime has only been checked with template synthesis and stubbed tests.
 - The local API persists run snapshots and idempotency keys in SQLite. DynamoDB stores AWS run and event-key records. Event bridge authenticity is enforced by a shared-secret HMAC, but production key rotation and replay windows need additional operational policy.
 - A duplicate idempotency key returns the first run instead of starting a second pipeline. SQLite uniqueness is locally enforced; production concurrent delivery and EventBridge retry behavior still require AWS integration testing.
 

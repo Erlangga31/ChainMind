@@ -1,5 +1,7 @@
 """Template-level assertions for the AWS infrastructure stack."""
 
+import json
+
 from aws_cdk import App
 from aws_cdk.assertions import Match, Template
 
@@ -14,6 +16,7 @@ def test_stack_contains_expected_workflow_and_agent_lambdas() -> None:
     template.resource_count_is("AWS::Events::EventBus", 1)
     template.resource_count_is("AWS::Events::Rule", 2)
     template.resource_count_is("AWS::SecretsManager::Secret", 1)
+    template.resource_count_is("AWS::SQS::Queue", 1)
     template.has_resource_properties(
         "AWS::ApiGateway::Resource",
         {"PathPart": "event-bridge"},
@@ -33,3 +36,15 @@ def test_stack_defines_bedrock_agents_guardrail_and_action_groups() -> None:
             "Instruction": Match.string_like_regexp("You are the ChainMind Monitoring Agent.*"),
         },
     )
+
+
+def test_state_machine_has_bounded_revision_and_callback_states() -> None:
+    template = Template.from_stack(ChainMindStack(App(), "TestWorkflowStack"))
+    serialized = json.dumps(template.to_json())
+
+    assert "WaitForHumanApproval" in serialized
+    assert "WaitForRevisedApproval3" in serialized
+    assert "RevisionLimitReached" in serialized
+    assert "HumanRejected" in serialized
+    assert "SendWorkflowFailureToDLQ" in serialized
+    assert "TracingConfiguration" in serialized

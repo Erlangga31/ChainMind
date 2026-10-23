@@ -231,7 +231,9 @@ def test_event_mesh_injects_scenario_to_configured_webhook(
         secret: str | None = None,
         *,
         require_signature: bool = False,
+        headers: dict[str, str] | None = None,
     ) -> None:
+        del headers
         delivered.append((url, payload, secret, require_signature))
 
     monkeypatch.setattr(sandbox_main, "post_webhook", capture_webhook)
@@ -255,7 +257,9 @@ def test_event_mesh_reports_webhook_failure(monkeypatch: Any) -> None:
         ___: str | None = None,
         *,
         require_signature: bool = False,
+        headers: dict[str, str] | None = None,
     ) -> None:
+        del require_signature, headers
         raise httpx.ConnectError("connection refused")
 
     monkeypatch.setattr(sandbox_main, "post_webhook", fail_webhook)
@@ -276,7 +280,7 @@ def test_event_mesh_reports_webhook_failure(monkeypatch: Any) -> None:
 def test_workflow_task_is_idempotent_and_callback_runs_once(monkeypatch: Any) -> None:
     import sandbox.sap_sandbox.main as sandbox_main
 
-    delivered: list[tuple[str, dict[str, Any]]] = []
+    delivered: list[tuple[str, dict[str, Any], dict[str, str] | None]] = []
 
     async def capture_webhook(
         url: str,
@@ -284,9 +288,10 @@ def test_workflow_task_is_idempotent_and_callback_runs_once(monkeypatch: Any) ->
         secret: str | None = None,
         *,
         require_signature: bool = False,
+        headers: dict[str, str] | None = None,
     ) -> None:
         del secret, require_signature
-        delivered.append((url, payload))
+        delivered.append((url, payload, headers))
 
     monkeypatch.setattr(sandbox_main, "post_webhook", capture_webhook)
     client = make_client()
@@ -306,6 +311,7 @@ def test_workflow_task_is_idempotent_and_callback_runs_once(monkeypatch: Any) ->
         (
             "http://chainmind.test/runs/run-123/decision",
             {"decision": "approve", "note": "Approved for demo."},
+            {"X-ChainMind-Role": "approver"},
         )
     ]
 
@@ -319,8 +325,9 @@ def test_workflow_rejects_conflicting_duplicate_decision(monkeypatch: Any) -> No
         ___: str | None = None,
         *,
         require_signature: bool = False,
+        headers: dict[str, str] | None = None,
     ) -> None:
-        del require_signature
+        del require_signature, headers
         return None
 
     monkeypatch.setattr(sandbox_main, "post_webhook", capture_webhook)

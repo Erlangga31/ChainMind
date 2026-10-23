@@ -3,9 +3,11 @@
 import base64
 import json
 from typing import Any
+from uuid import uuid4
 
 import httpx
 import pytest
+from botocore.exceptions import ClientError
 
 from chainmind.agents.monitoring import MonitoringAgent
 from chainmind.core.config import Settings
@@ -14,6 +16,7 @@ from chainmind.core.events import EventStore, SQLiteEventStore
 from chainmind.core.models import DisruptionEvent, DisruptionRun, DisruptionType
 from chainmind.factory import create_pipeline
 from chainmind.handlers import event_bridge, external_poll
+from chainmind.integrations.aws import event_publisher
 from chainmind.integrations.external.mock import MockLogisticsClient, MockWeatherClient
 from chainmind.integrations.external.open_meteo import OpenMeteoWeatherClient
 from chainmind.integrations.external.signing import parse_signed_event, sign_payload
@@ -119,22 +122,27 @@ def test_event_bridge_lambda_publishes_valid_event(monkeypatch: Any) -> None:
     calls: list[dict[str, Any]] = []
     monkeypatch.setenv("CHAINMIND_EVENT_BRIDGE_SECRET", BRIDGE_SECRET)
     monkeypatch.setenv("CHAINMIND_EVENT_BUS_NAME", "chainmind")
+    monkeypatch.setenv("CHAINMIND_EVENT_TABLE_NAME", "events")
     monkeypatch.setattr(
-        event_bridge.boto3,
-        "client",
-        lambda service: (
-            type(
-                "Events",
-                (),
-                {
-                    "put_events": lambda self, **kwargs: (
-                        calls.append(kwargs) or {"FailedEntryCount": 0}
+        event_bridge,
+        "EventBridgePublisher",
+        lambda table_name, bus_name, region: type(
+            "Publisher",
+            (),
+            {
+                "publish": lambda self, item: (
+                    calls.append(
+                        {
+                            "table_name": table_name,
+                            "bus_name": bus_name,
+                            "region": region,
+                            "event": item,
+                        }
                     )
-                },
-            )()
-            if service == "events"
-            else None
-        ),
+                    or (item.event_id, True)
+                )
+            },
+        )(),
     )
     event = DisruptionEvent(
         title="Weather delay",
@@ -153,7 +161,7 @@ def test_event_bridge_lambda_publishes_valid_event(monkeypatch: Any) -> None:
 
     assert response["statusCode"] == 202
     assert json.loads(response["body"])["event_id"] == str(event.event_id)
-    assert calls[0]["Entries"][0]["EventBusName"] == "chainmind"
+    assert calls[0]["bus_name"] == "chainmind"
 
 
 def test_event_bridge_lambda_rejects_bad_signature_without_publishing(
@@ -182,6 +190,99 @@ def test_external_poll_is_disabled_by_default(monkeypatch: Any) -> None:
     monkeypatch.delenv("CHAINMIND_EXTERNAL_POLL_ENABLED", raising=False)
 
     assert external_poll.handler({}, None) == {"status": "disabled", "published": 0}
+
+
+def test_aws_event_publisher_reserves_idempotency_key(monkeypatch: Any) -> None:
+    class Table:
+        def __init__(self) -> None:
+            self.items: dict[str, dict[str, Any]] = {}
+
+        def put_item(self, *, Item: dict[str, Any], ConditionExpression: str) -> None:
+            del ConditionExpression
+            if Item["run_id"] in self.items:
+                raise ClientError(
+                    {"Error": {"Code": "ConditionalCheckFailedException"}},
+                    "PutItem",
+                )
+            self.items[Item["run_id"]] = Item.copy()
+
+        def get_item(self, *, Key: dict[str, str]) -> dict[str, Any]:
+            return {"Item": self.items.get(Key["run_id"])}
+
+        def update_item(self, *, Key: dict[str, str], **kwargs: Any) -> None:
+            self.items[Key["run_id"]]["event_status"] = kwargs["ExpressionAttributeValues"][
+                ":published"
+            ]
+
+        def delete_item(self, *, Key: dict[str, str]) -> None:
+            self.items.pop(Key["run_id"], None)
+
+    class Events:
+        def __init__(self) -> None:
+            self.entries: list[dict[str, Any]] = []
+
+        def put_events(self, *, Entries: list[dict[str, Any]]) -> dict[str, int]:
+            self.entries.extend(Entries)
+            return {"FailedEntryCount": 0}
+
+    table = Table()
+    events = Events()
+    monkeypatch.setattr(
+        event_publisher.boto3,
+        "resource",
+        lambda *args, **kwargs: type("Resource", (), {"Table": lambda self, name: table})(),
+    )
+    monkeypatch.setattr(event_publisher.boto3, "client", lambda *args, **kwargs: events)
+    publisher = event_publisher.EventBridgePublisher("events", "chainmind", "us-east-1")
+    event = DisruptionEvent(
+        title="Weather delay",
+        description="Severe weather delayed the shipment.",
+        delay_days=5,
+        idempotency_key="weather-alert-1",
+    )
+
+    assert publisher.publish(event) == (event.event_id, True)
+    assert publisher.publish(event) == (event.event_id, False)
+    replay_with_new_id = event.model_copy(update={"event_id": uuid4()})
+    assert publisher.publish(replay_with_new_id) == (event.event_id, False)
+    assert len(events.entries) == 1
+
+
+def test_aws_event_publisher_clears_reservation_on_definite_rejection(
+    monkeypatch: Any,
+) -> None:
+    class Table:
+        def __init__(self) -> None:
+            self.items: dict[str, dict[str, Any]] = {}
+
+        def put_item(self, *, Item: dict[str, Any], ConditionExpression: str) -> None:
+            del ConditionExpression
+            self.items[Item["run_id"]] = Item
+
+        def delete_item(self, *, Key: dict[str, str]) -> None:
+            self.items.pop(Key["run_id"], None)
+
+    class Events:
+        def put_events(self, *, Entries: list[dict[str, Any]]) -> dict[str, int]:
+            del Entries
+            return {"FailedEntryCount": 1}
+
+    table = Table()
+    monkeypatch.setattr(
+        event_publisher.boto3,
+        "resource",
+        lambda *args, **kwargs: type("Resource", (), {"Table": lambda self, name: table})(),
+    )
+    monkeypatch.setattr(event_publisher.boto3, "client", lambda *args, **kwargs: Events())
+    event = DisruptionEvent(
+        title="Weather delay",
+        description="Severe weather delayed the shipment.",
+        delay_days=5,
+    )
+
+    with pytest.raises(ChainMindError, match="could not be published"):
+        event_publisher.EventBridgePublisher("events", "chainmind", "us-east-1").publish(event)
+    assert table.items == {}
 
 
 def test_open_meteo_client_is_opt_in_and_maps_severe_weather() -> None:

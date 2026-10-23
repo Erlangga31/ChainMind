@@ -1,6 +1,5 @@
 """DynamoDB-backed run store for AWS deployments."""
 
-from hashlib import sha256
 from uuid import UUID
 
 import boto3
@@ -10,6 +9,10 @@ from botocore.exceptions import BotoCoreError, ClientError
 from chainmind.core.errors import IntegrationError
 from chainmind.core.events import RunStore
 from chainmind.core.models import DisruptionRun
+from chainmind.integrations.aws.event_publisher import (
+    event_record_id,
+    event_record_id_for_key,
+)
 
 
 class DynamoDBEventStore(RunStore):
@@ -31,9 +34,10 @@ class DynamoDBEventStore(RunStore):
             )
             self._table.put_item(
                 Item={
-                    "run_id": f"event#{sha256(run.event.dedupe_key.encode()).hexdigest()}",
+                    "run_id": event_record_id(run.event),
                     "created_at": run.created_at.isoformat(),
                     "event_key": run.event.dedupe_key,
+                    "event_id": str(run.event.event_id),
                     "linked_run_id": str(run.run_id),
                 }
             )
@@ -59,10 +63,8 @@ class DynamoDBEventStore(RunStore):
         """Resolve an idempotency index record to its stored run."""
 
         try:
-            link = self._table.get_item(
-                Key={"run_id": f"event#{sha256(key.encode()).hexdigest()}"}
-            ).get("Item")
-            if not link:
+            link = self._table.get_item(Key={"run_id": event_record_id_for_key(key)}).get("Item")
+            if not link or not link.get("linked_run_id"):
                 return None
             item = self._table.get_item(Key={"run_id": link["linked_run_id"]}).get("Item")
         except (BotoCoreError, ClientError, KeyError) as exc:

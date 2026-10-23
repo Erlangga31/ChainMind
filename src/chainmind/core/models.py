@@ -8,6 +8,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from chainmind.workflow.definition import WorkflowState
+
 
 class DomainModel(BaseModel):
     """Base model with strict input validation."""
@@ -224,6 +226,8 @@ class DisruptionRun(DomainModel):
     run_id: UUID = Field(default_factory=uuid4)
     event: DisruptionEvent
     status: RunStatus = RunStatus.ANALYZING
+    workflow_state: WorkflowState = WorkflowState.INGESTED
+    revision_count: int = Field(default=0, ge=0)
     severity: Severity | None = None
     significant: bool = False
     affected_records: AffectedSupplyChainRecords | None = None

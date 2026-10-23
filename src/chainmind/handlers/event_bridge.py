@@ -9,6 +9,7 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
 from chainmind.core.errors import ChainMindError
+from chainmind.integrations.aws.event_publisher import EventBridgePublisher
 from chainmind.integrations.external.signing import parse_signed_event
 
 
@@ -55,33 +56,28 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
             {"code": "bridge_secret_unavailable", "message": "Bridge secret is unavailable."},
         )
     bus_name = os.environ.get("CHAINMIND_EVENT_BUS_NAME")
-    if not bus_name:
+    table_name = os.environ.get("CHAINMIND_EVENT_TABLE_NAME")
+    if not bus_name or not table_name:
         return _response(
             503,
-            {"code": "event_bus_not_configured", "message": "Event bus is not configured."},
+            {
+                "code": "event_ingestion_not_configured",
+                "message": "Event ingestion is not configured.",
+            },
         )
     try:
-        result = boto3.client("events").put_events(
-            Entries=[
-                {
-                    "EventBusName": bus_name,
-                    "Source": "chainmind.disruptions",
-                    "DetailType": "SupplyChainDisruption",
-                    "Detail": disruption.model_dump_json(),
-                }
-            ]
-        )
-    except (BotoCoreError, ClientError):
-        return _response(
-            503,
-            {"code": "event_publish_failed", "message": "Event could not be published."},
-        )
-    if result.get("FailedEntryCount", 0):
-        return _response(
-            502,
-            {"code": "event_publish_failed", "message": "Event could not be published."},
-        )
+        canonical_event_id, published = EventBridgePublisher(
+            table_name,
+            bus_name,
+            os.environ.get("CHAINMIND_AWS_REGION", "us-east-1"),
+        ).publish(disruption)
+    except ChainMindError as exc:
+        return _response(exc.status_code, {"code": exc.code, "message": exc.message})
     return _response(
         202,
-        {"status": "accepted", "event_id": str(disruption.event_id)},
+        {
+            "status": "accepted",
+            "duplicate": not published,
+            "event_id": str(canonical_event_id),
+        },
     )

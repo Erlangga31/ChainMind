@@ -142,6 +142,7 @@ Salin `.env.example` ke `.env` bila ingin mengubah konfigurasi lokal. `.env` tid
 | `CHAINMIND_SAFETY_RESERVE_DAYS` | `0.25` | Cadangan hari untuk estimasi stockout residual |
 | `CHAINMIND_RETRY_ATTEMPTS` | `3` | Percobaan maksimal integrasi |
 | `CHAINMIND_RETRY_BASE_DELAY_SECONDS` | `0.1` | Jeda awal exponential backoff |
+| `CHAINMIND_MAX_REVISIONS` | `3` | Batas revisi vendor sebelum approval ditolak |
 | `CHAINMIND_EVENT_TABLE_NAME` | `chainmind-events` | Tabel event/run DynamoDB |
 | `CHAINMIND_EVENT_DATABASE_PATH` | `data/chainmind-events.sqlite3` | File SQLite run/event lokal dan index idempotensi |
 | `CHAINMIND_EVENT_BUS_NAME` | `chainmind` | Event bus tujuan event bridge dan external poller |
@@ -162,6 +163,7 @@ Salin `.env.example` ke `.env` bila ingin mengubah konfigurasi lokal. `.env` tid
 
 AWS credentials tidak dimasukkan ke berkas konfigurasi proyek: boto3 menggunakan AWS credential chain standar.
 Gunakan kredensial dummy hanya untuk SAP sandbox lokal. Backend `real` belum diverifikasi terhadap tenant SAP asli.
+Header `X-ChainMind-Role` dipakai sebagai role demo pada API lokal (dashboard memakai peran `approver` secara default dan menerima `viewer` dari `sessionStorage`). Header ini bukan autentikasi produksi; deployment perlu authorizer yang menerbitkan role terverifikasi.
 
 ### SAP sandbox lokal
 

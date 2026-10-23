@@ -1,13 +1,10 @@
 """Scheduled event-source poller that publishes normalized disruptions."""
 
-import json
 import os
 from typing import Any
 
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
-
 from chainmind.core.errors import IntegrationError
+from chainmind.integrations.aws.event_publisher import EventBridgePublisher
 from chainmind.integrations.external.base import LogisticsClient, WeatherClient
 from chainmind.integrations.external.mock import MockLogisticsClient, MockWeatherClient
 from chainmind.integrations.external.open_meteo import OpenMeteoWeatherClient
@@ -35,27 +32,19 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     if not bus_name:
         raise IntegrationError("External polling requires CHAINMIND_EVENT_BUS_NAME.")
     weather_client, logistics_client = _clients()
-    try:
-        events = [*weather_client.fetch_events(), *logistics_client.fetch_events()]
-        if not events:
-            return {"status": "completed", "published": 0}
-        response = boto3.client("events").put_events(
-            Entries=[
-                {
-                    "EventBusName": bus_name,
-                    "Source": "chainmind.disruptions",
-                    "DetailType": "SupplyChainDisruption",
-                    "Detail": json.dumps(item.model_dump(mode="json")),
-                }
-                for item in events
-            ]
-        )
-    except (BotoCoreError, ClientError) as exc:
-        raise IntegrationError("External disruption events could not be published.") from exc
-    failures = response.get("FailedEntryCount", 0)
-    if failures:
-        raise IntegrationError(
-            "Some external disruption events could not be published.",
-            details={"failed_entries": failures},
-        )
-    return {"status": "completed", "published": len(events)}
+    table_name = os.environ.get("CHAINMIND_EVENT_TABLE_NAME")
+    if not table_name:
+        raise IntegrationError("External polling requires CHAINMIND_EVENT_TABLE_NAME.")
+    events = [*weather_client.fetch_events(), *logistics_client.fetch_events()]
+    publisher = EventBridgePublisher(
+        table_name,
+        bus_name,
+        os.environ.get("CHAINMIND_AWS_REGION", "us-east-1"),
+    )
+    results = [publisher.publish(item) for item in events]
+    published = sum(is_new for _, is_new in results)
+    return {
+        "status": "completed",
+        "published": published,
+        "duplicates": len(events) - published,
+    }

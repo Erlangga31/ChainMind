@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     safety_reserve_days: float = Field(default=0.25, ge=0)
     retry_attempts: int = Field(default=3, ge=1, le=8)
     retry_base_delay_seconds: float = Field(default=0.1, ge=0)
+    max_revisions: int = Field(default=3, ge=0, le=10)
     event_table_name: str = "chainmind-events"
     event_database_path: str = "data/chainmind-events.sqlite3"
     event_bus_name: str = "chainmind"

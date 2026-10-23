@@ -28,9 +28,30 @@ def test_disruption_api_lists_run_and_records_rejection() -> None:
     decision = client.post(
         f"/runs/{run_id}/decision",
         json={"decision": "reject", "note": "Need supervisor review."},
+        headers={"X-ChainMind-Role": "approver"},
     )
     assert decision.status_code == 200
     assert decision.json()["status"] == "REJECTED"
+
+
+def test_viewer_and_missing_role_cannot_submit_decisions() -> None:
+    run = client.post(
+        "/disruptions",
+        json={
+            "title": "Weather delay",
+            "description": "Extreme weather has delayed the vessel.",
+            "delay_days": 5,
+        },
+    ).json()
+    url = f"/runs/{run['run_id']}/decision"
+    payload = {"decision": "reject", "note": "Viewer must not approve."}
+
+    viewer = client.post(url, json=payload, headers={"X-ChainMind-Role": "viewer"})
+    missing = client.post(url, json=payload)
+
+    assert viewer.status_code == 403
+    assert viewer.json()["code"] == "approver_role_required"
+    assert missing.status_code == 403
 
 
 def test_validation_and_health_responses_are_structured() -> None:
@@ -47,9 +68,10 @@ def test_dashboard_loopback_origin_is_allowed_by_cors() -> None:
         headers={
             "Origin": "http://127.0.0.1:5173",
             "Access-Control-Request-Method": "POST",
-            "Access-Control-Request-Headers": "content-type",
+            "Access-Control-Request-Headers": "content-type,x-chainmind-role",
         },
     )
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
+    assert "x-chainmind-role" in response.headers["access-control-allow-headers"].lower()

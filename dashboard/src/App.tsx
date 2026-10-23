@@ -25,7 +25,13 @@ async function responseError(response: Response): Promise<Error> {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...(path.endsWith("/decision")
+        ? { "X-ChainMind-Role": sessionStorage.getItem("chainmind.role") ?? "approver" }
+        : {}),
+      ...init?.headers,
+    },
   });
   if (!response.ok) throw await responseError(response);
   return (await response.json()) as T;

@@ -28,6 +28,7 @@ from chainmind.core.retry import retry_integration_call
 from chainmind.integrations.llm.base import LLMClient
 from chainmind.integrations.sap.base import ApprovalWorkflowClient, AribaClient, SAPClient
 from chainmind.integrations.sap.real_clients import InMemoryApprovalWorkflowClient
+from chainmind.workflow.definition import WorkflowState, validate_transition
 
 
 class DisruptionPipeline:
@@ -72,6 +73,7 @@ class DisruptionPipeline:
         run = DisruptionRun(event=event)
         self._store.save(run)
         try:
+            self._transition(run, WorkflowState.MONITORING)
             inventory = retry_integration_call(
                 lambda: self._sap.get_inventory(event.component_id),
                 attempts=self._settings.retry_attempts,
@@ -107,12 +109,14 @@ class DisruptionPipeline:
             self._store.save(run)
 
             if not monitoring.significant:
+                self._transition(run, WorkflowState.NOT_SIGNIFICANT)
                 run.status = RunStatus.NOT_SIGNIFICANT
                 self._skip_remaining_stages(run)
                 run.updated_at = datetime.now(UTC)
                 self._store.save(run)
                 return run
 
+            self._transition(run, WorkflowState.LOGISTICS)
             logistics = self._logistics.analyze(event, inventory)
             run.chain_of_thought.append(logistics.reasoning)
             run.audit_log.append(
@@ -126,6 +130,7 @@ class DisruptionPipeline:
             )
             self._store.save(run)
 
+            self._transition(run, WorkflowState.PROCUREMENT)
             procurement = retry_integration_call(
                 lambda: self._procurement.compare(event, inventory, logistics),
                 attempts=self._settings.retry_attempts,
@@ -144,6 +149,7 @@ class DisruptionPipeline:
             )
             self._store.save(run)
 
+            self._transition(run, WorkflowState.ORCHESTRATOR)
             orchestration = retry_integration_call(
                 lambda: self._orchestrator.choose(
                     procurement,
@@ -229,11 +235,13 @@ class DisruptionPipeline:
                 )
             )
             run.status = RunStatus.PENDING_APPROVAL
+            self._transition(run, WorkflowState.HUMAN_APPROVAL)
             self._run_context[run.run_id] = (inventory, logistics, procurement)
             run.updated_at = datetime.now(UTC)
             self._store.save(run)
             return run
         except ChainMindError as exc:
+            self._transition(run, WorkflowState.FAILED)
             run.status = RunStatus.FAILED
             run.error = exc.message
             run.audit_log.append(
@@ -296,6 +304,7 @@ class DisruptionPipeline:
                     decision.note,
                 )
             run.status = RunStatus.REJECTED
+            self._transition(run, WorkflowState.REJECTED)
             run.draft_po.status = "REJECTED"
             run.last_decision = decision.model_copy(deep=True)
             run.audit_log.append(
@@ -323,12 +332,14 @@ class DisruptionPipeline:
                 decision.decision.value,
                 decision.note,
             )
+        self._transition(run, WorkflowState.EXECUTION)
         sap_reference = retry_integration_call(
             lambda: self._sap.execute_purchase_order(run.draft_po),
             attempts=self._settings.retry_attempts,
             base_delay_seconds=self._settings.retry_base_delay_seconds,
         )
         run.status = RunStatus.EXECUTED
+        self._transition(run, WorkflowState.COMPLETED)
         run.draft_po.status = "EXECUTED"
         run.draft_po.sap_reference = sap_reference
         run.last_decision = decision.model_copy(deep=True)
@@ -357,6 +368,14 @@ class DisruptionPipeline:
                 "A vendor_id is required when requesting a vendor revision.",
                 status_code=422,
             )
+        if run.revision_count >= self._settings.max_revisions:
+            raise ChainMindError(
+                "revision_limit_reached",
+                "The maximum number of vendor revisions has been reached.",
+                status_code=409,
+                details={"max_revisions": self._settings.max_revisions},
+            )
+        self._transition(run, WorkflowState.PROCUREMENT)
         context = self._run_context.get(run.run_id)
         if context is None:
             raise ChainMindError(
@@ -377,6 +396,7 @@ class DisruptionPipeline:
             attempts=self._settings.retry_attempts,
             base_delay_seconds=self._settings.retry_base_delay_seconds,
         )
+        self._transition(run, WorkflowState.ORCHESTRATOR)
         new_order = self._orchestrator.draft_purchase_order(revised.selected_vendor, inventory)
         run.draft_po = retry_integration_call(
             lambda: self._sap.create_draft_purchase_order(new_order),
@@ -386,6 +406,8 @@ class DisruptionPipeline:
         if run.workflow_task_id is not None:
             self._workflow.update_draft(run.workflow_task_id, str(run.draft_po.po_id))
         run.selected_vendor_id = revised.selected_vendor.vendor.vendor_id
+        run.revision_count += 1
+        self._transition(run, WorkflowState.HUMAN_APPROVAL)
         run.revision_note = decision.note
         run.last_decision = decision.model_copy(deep=True)
         run.trace_steps.extend(revised.trace)
@@ -443,6 +465,11 @@ class DisruptionPipeline:
             ),
             draft_po=run.draft_po,
         )
+
+    @staticmethod
+    def _transition(run: DisruptionRun, following: WorkflowState) -> None:
+        validate_transition(run.workflow_state, following)
+        run.workflow_state = following
 
     @staticmethod
     def _complete_decision(

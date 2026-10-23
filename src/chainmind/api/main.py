@@ -1,6 +1,7 @@
 """FastAPI endpoints for disruptions, run history, and human decisions."""
 
 import logging
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import FastAPI, Header, Request
@@ -12,15 +13,21 @@ from fastapi.responses import JSONResponse
 from chainmind.core.config import get_settings
 from chainmind.core.errors import ChainMindError
 from chainmind.core.models import (
+    AuditEntry,
     DecisionRequest,
     DecisionResult,
+    DecisionType,
     DisruptionEvent,
     DisruptionRun,
     ErrorResponse,
     RunCreatedResponse,
+    RunStatus,
 )
 from chainmind.factory import create_pipeline
+from chainmind.integrations.aws.approval import StepFunctionsApprovalClient
+from chainmind.integrations.aws.event_publisher import EventBridgePublisher
 from chainmind.integrations.external.signing import parse_signed_event
+from chainmind.workflow.definition import WorkflowState
 
 logger = logging.getLogger("chainmind.api")
 settings = get_settings()
@@ -35,7 +42,12 @@ app.add_middleware(
     allow_origins=settings.api_cors_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "X-ChainMind-Signature", "Idempotency-Key"],
+    allow_headers=[
+        "Content-Type",
+        "X-ChainMind-Signature",
+        "Idempotency-Key",
+        "X-ChainMind-Role",
+    ],
 )
 
 
@@ -95,6 +107,23 @@ def ingest_disruption(
 
     if idempotency_key:
         event.idempotency_key = idempotency_key
+    if settings.mode == "aws":
+        try:
+            canonical_event_id, _ = EventBridgePublisher(
+                settings.event_table_name,
+                settings.event_bus_name,
+                settings.aws_region,
+            ).publish(event)
+        except ChainMindError as exc:
+            raise ChainMindError(
+                "event_publish_failed",
+                "The disruption could not be published to the workflow.",
+                status_code=503,
+            ) from exc
+        return RunCreatedResponse(
+            run_id=canonical_event_id,
+            status=RunStatus.ANALYZING,
+        )
     run = pipeline.run(event)
     return RunCreatedResponse(run_id=run.run_id, status=run.status, severity=run.severity)
 
@@ -127,7 +156,111 @@ def get_run(run_id: UUID) -> DisruptionRun:
 
 
 @app.post("/runs/{run_id}/decision", response_model=DecisionResult)
-def decide(run_id: UUID, decision: DecisionRequest) -> DecisionResult:
+def decide(
+    run_id: UUID,
+    decision: DecisionRequest,
+    role: str | None = Header(default=None, alias="X-ChainMind-Role"),
+) -> DecisionResult:
     """Record an approval, rejection, or requested vendor revision."""
 
+    if role != "approver":
+        raise ChainMindError(
+            "approver_role_required",
+            "Only a user with the approver role can decide a purchase order.",
+            status_code=403,
+        )
+    if settings.mode == "aws":
+        return _decide_aws(run_id, decision, role)
     return pipeline.decide(run_id, decision)
+
+
+def _decide_aws(run_id: UUID, decision: DecisionRequest, role: str) -> DecisionResult:
+    """Resume a persisted Step Functions approval task in AWS mode."""
+
+    run = pipeline.get_run(run_id)
+    if run.last_decision == decision:
+        return DecisionResult(
+            run_id=run.run_id,
+            status=run.status,
+            message="This decision was already recorded.",
+            draft_po=run.draft_po,
+        )
+    if run.status != RunStatus.PENDING_APPROVAL or run.draft_po is None:
+        raise ChainMindError(
+            "decision_not_allowed",
+            "A decision can only be recorded for a draft pending approval.",
+            status_code=409,
+            details={"status": run.status.value},
+        )
+    if decision.decision is DecisionType.REVISE:
+        if not decision.vendor_id:
+            raise ChainMindError(
+                "vendor_required",
+                "A vendor_id is required when requesting a vendor revision.",
+                status_code=422,
+            )
+        if run.revision_count >= settings.max_revisions:
+            raise ChainMindError(
+                "revision_limit_reached",
+                "The maximum number of vendor revisions has been reached.",
+                status_code=409,
+                details={"max_revisions": settings.max_revisions},
+            )
+        if not any(
+            item.vendor.vendor_id == decision.vendor_id and item.feasible
+            for item in run.vendor_comparison
+        ):
+            raise ChainMindError(
+                "vendor_not_feasible",
+                "The selected vendor is not a feasible alternative for this run.",
+                status_code=422,
+                details={"vendor_id": decision.vendor_id},
+            )
+    StepFunctionsApprovalClient(
+        settings.event_table_name,
+        settings.aws_region,
+    ).complete(run_id, decision, role)
+
+    run.last_decision = decision.model_copy(deep=True)
+    run.audit_log.append(
+        AuditEntry(
+            agent="human",
+            input_summary=f"run_id={run.run_id}; role={role}",
+            output_summary=f"Decision submitted: {decision.decision.value}.",
+            reasoning=decision.note or "Authorized approver decision sent to Step Functions.",
+        )
+    )
+    if decision.decision is DecisionType.REJECT:
+        run.status = RunStatus.REJECTED
+        run.workflow_state = WorkflowState.REJECTED
+        run.draft_po.status = "REJECTED"
+        for stage in run.stages:
+            if stage.name == "Human approval":
+                stage.status = "REJECTED"
+            elif stage.name == "PO execution":
+                stage.status = "NOT_EXECUTED"
+    elif decision.decision is DecisionType.APPROVE:
+        run.status = RunStatus.APPROVED
+        run.workflow_state = WorkflowState.EXECUTION
+        run.draft_po.status = "APPROVED"
+        for stage in run.stages:
+            if stage.name == "Human approval":
+                stage.status = "APPROVED"
+            elif stage.name == "PO execution":
+                stage.status = "IN_PROGRESS"
+    else:
+        run.revision_count += 1
+        run.revision_note = decision.note
+        run.workflow_state = WorkflowState.PROCUREMENT
+    run.updated_at = datetime.now(UTC)
+    pipeline.store.save(run)
+    return DecisionResult(
+        run_id=run.run_id,
+        status=run.status,
+        message=(
+            "Decision sent to the Step Functions approval workflow."
+            if decision.decision is not DecisionType.REJECT
+            else "Draft rejected; no SAP purchase order will be executed."
+        ),
+        draft_po=run.draft_po,
+    )

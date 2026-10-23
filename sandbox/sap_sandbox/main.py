@@ -143,20 +143,21 @@ async def post_webhook(
     secret: str | None = None,
     *,
     require_signature: bool = False,
+    headers: dict[str, str] | None = None,
 ) -> None:
     """Deliver a simulator webhook and sign event messages when requested."""
 
     if require_signature and not secret:
         raise ValueError("SAP_SANDBOX_EVENT_BRIDGE_SECRET must be configured.")
-    headers = {"Content-Type": "application/json"}
+    request_headers = {"Content-Type": "application/json", **(headers or {})}
     body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     if secret:
-        headers[SIGNATURE_HEADER] = sign_payload(body, secret)
+        request_headers[SIGNATURE_HEADER] = sign_payload(body, secret)
     async with httpx.AsyncClient(timeout=5.0) as client:
         response = await client.post(
             url,
             content=body,
-            headers=headers,
+            headers=request_headers,
         )
         response.raise_for_status()
 
@@ -696,7 +697,11 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
                 "note": decision.note,
             }
         try:
-            await post_webhook(callback_url, callback_payload)
+            await post_webhook(
+                callback_url,
+                callback_payload,
+                headers={"X-ChainMind-Role": "approver"},
+            )
         except httpx.HTTPError:
             async with state.workflow_lock:
                 task.status = "PENDING"

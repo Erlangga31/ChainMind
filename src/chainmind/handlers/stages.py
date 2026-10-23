@@ -14,13 +14,17 @@ from chainmind.agents.procurement import ProcurementAgent
 from chainmind.core.config import Settings
 from chainmind.core.errors import IntegrationError
 from chainmind.core.models import (
+    AuditEntry,
     DisruptionEvent,
     InventorySnapshot,
     LogisticsResult,
     ProcurementResult,
+    RunStatus,
 )
 from chainmind.core.retry import retry_integration_call
 from chainmind.factory import create_llm_client, create_sap_clients
+from chainmind.integrations.aws.event_store import DynamoDBEventStore
+from chainmind.workflow.definition import WorkflowState
 
 
 def monitoring(event: dict[str, Any], context: object) -> dict[str, Any]:
@@ -84,8 +88,14 @@ def orchestrator(event: dict[str, Any], context: object) -> dict[str, Any]:
     procurement_result = ProcurementResult.model_validate(event["procurement"])
     settings = Settings()
     agent = OrchestratorAgent(create_llm_client(settings))
+    approval = event.get("approval", {})
+    vendor_id = approval.get("vendor_id") if approval.get("decision") == "revise" else None
     result = retry_integration_call(
-        lambda: agent.choose(procurement_result, logistics_result),
+        lambda: agent.choose(
+            procurement_result,
+            logistics_result,
+            vendor_id=vendor_id,
+        ),
         attempts=settings.retry_attempts,
         base_delay_seconds=settings.retry_base_delay_seconds,
     )
@@ -128,6 +138,8 @@ def orchestrator(event: dict[str, Any], context: object) -> dict[str, Any]:
     return {
         "result": result.model_dump(mode="json"),
         "draft_po": draft.model_dump(mode="json"),
+        "revision_count": int(event.get("workflow", {}).get("revision_count", 0))
+        + (1 if approval.get("decision") == "revise" else 0),
     }
 
 
@@ -143,14 +155,32 @@ def execute_approved(event: dict[str, Any], context: object) -> dict[str, str]:
     draft = PurchaseOrder.model_validate(event["orchestration"]["draft_po"])
     settings = Settings()
     sap, _ = create_sap_clients(settings)
-    retry_integration_call(
-        lambda: sap.create_draft_purchase_order(draft),
-        attempts=settings.retry_attempts,
-        base_delay_seconds=settings.retry_base_delay_seconds,
-    )
     reference = retry_integration_call(
         lambda: sap.execute_purchase_order(draft),
         attempts=settings.retry_attempts,
         base_delay_seconds=settings.retry_base_delay_seconds,
     )
+    if settings.mode == "aws":
+        run_id = DisruptionEvent.model_validate(event["event"]).event_id
+        store = DynamoDBEventStore(settings.event_table_name, settings.aws_region)
+        run = store.get(run_id)
+        if run is not None:
+            run.status = RunStatus.EXECUTED
+            run.workflow_state = WorkflowState.COMPLETED
+            if run.draft_po is not None:
+                run.draft_po.status = "EXECUTED"
+                run.draft_po.sap_reference = reference
+            for stage in run.stages:
+                if stage.name == "PO execution":
+                    stage.status = "EXECUTED"
+                    stage.summary = f"Approved purchase order executed as {reference}."
+            run.audit_log.append(
+                AuditEntry(
+                    agent="sap_s4hana",
+                    input_summary=f"run_id={run.run_id}; po_id={draft.po_id}",
+                    output_summary=f"Approved purchase order executed as {reference}.",
+                    reasoning="SAP execution followed a verified Step Functions approval callback.",
+                )
+            )
+            store.save(run)
     return {"status": "EXECUTED", "sap_reference": reference}

@@ -36,12 +36,17 @@ from aws_cdk import (
     aws_secretsmanager as secretsmanager,
 )
 from aws_cdk import (
+    aws_sqs as sqs,
+)
+from aws_cdk import (
     aws_stepfunctions as sfn,
 )
 from aws_cdk import (
     aws_stepfunctions_tasks as tasks,
 )
 from constructs import Construct
+
+from chainmind.workflow.definition import WorkflowState, validate_transition
 
 
 class ChainMindStack(Stack):
@@ -55,6 +60,10 @@ class ChainMindStack(Stack):
         bedrock_model_id = str(
             self.node.try_get_context("bedrockModelId") or "anthropic.claude-3-haiku-20240307-v1:0"
         )
+        configured_max_revisions = self.node.try_get_context("maxRevisions")
+        max_revisions = int(3 if configured_max_revisions is None else configured_max_revisions)
+        if not 0 <= max_revisions <= 10:
+            raise ValueError("Set maxRevisions CDK context to a value between 0 and 10.")
         llm_backend = str(
             self.node.try_get_context("llmBackend")
             or ("mock" if chainmind_mode == "mock" else "bedrock_agents")
@@ -82,6 +91,13 @@ class ChainMindStack(Stack):
             ),
             encryption=dynamodb.TableEncryption.AWS_MANAGED,
             removal_policy=RemovalPolicy.RETAIN,
+        )
+        workflow_dlq = sqs.Queue(
+            self,
+            "WorkflowDeadLetterQueue",
+            queue_name="chainmind-workflow-dlq",
+            encryption=sqs.QueueEncryption.SQS_MANAGED,
+            retention_period=Duration.days(14),
         )
 
         # Private S3 storage for decision rationale and audit artifacts.
@@ -119,6 +135,7 @@ class ChainMindStack(Stack):
                     "CHAINMIND_BEDROCK_MODEL_ID": bedrock_model_id,
                     "CHAINMIND_EVENT_TABLE_NAME": event_store.table_name,
                     "CHAINMIND_ARTIFACT_BUCKET": artifacts.bucket_name,
+                    "CHAINMIND_MAX_REVISIONS": str(max_revisions),
                     **(environment or {}),
                 },
             )
@@ -172,6 +189,12 @@ class ChainMindStack(Stack):
         )
         event_store.grant_read_write_data(api_handler)
         artifacts.grant_put(api_handler, "runs/*")
+        api_handler.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["states:SendTaskSuccess", "states:SendTaskFailure"],
+                resources=["*"],
+            )
+        )
 
         bridge_secret = secretsmanager.Secret(
             self,
@@ -194,6 +217,7 @@ class ChainMindStack(Stack):
             },
         )
         bridge_secret.grant_read(event_bridge_handler)
+        event_store.grant_write_data(event_bridge_handler)
         external_poll = make_function(
             "ExternalDisruptionPoller",
             "chainmind.handlers.external_poll.handler",
@@ -208,6 +232,8 @@ class ChainMindStack(Stack):
                 ).lower(),
             },
         )
+        event_store.grant_write_data(external_poll)
+        external_poll.add_environment("CHAINMIND_EVENT_TABLE_NAME", event_store.table_name)
 
         # Phase 3 action-group Lambda calls the existing deterministic agent and SAP adapters.
         action_group_handler = make_function(
@@ -346,10 +372,24 @@ class ChainMindStack(Stack):
             )
         )
 
+        workflow_failure = sfn.Fail(
+            self,
+            "WorkflowFailed",
+            error="WorkflowTaskFailed",
+            cause="A workflow task failed after configured retries.",
+        )
+        failure_task = tasks.SqsSendMessage(
+            self,
+            "SendWorkflowFailureToDLQ",
+            queue=workflow_dlq,
+            message_body=sfn.TaskInput.from_json_path_at("$"),
+            result_path=sfn.JsonPath.DISCARD,
+        ).next(workflow_failure)
+
         # Step Functions: four agent stages followed by a callback-token approval wait.
         monitoring_task = tasks.LambdaInvoke(
             self,
-            "MonitoringStage",
+            f"{WorkflowState.MONITORING.value.title()}Stage",
             lambda_function=monitoring,
             payload=sfn.TaskInput.from_object({"event": sfn.JsonPath.object_at("$.event")}),
             payload_response_only=True,
@@ -361,9 +401,10 @@ class ChainMindStack(Stack):
             backoff_rate=2,
             max_attempts=3,
         )
+        monitoring_task.add_catch(failure_task, errors=["States.ALL"], result_path="$.error")
         logistics_task = tasks.LambdaInvoke(
             self,
-            "LogisticsStage",
+            f"{WorkflowState.LOGISTICS.value.title()}Stage",
             lambda_function=logistics,
             payload=sfn.TaskInput.from_object(
                 {
@@ -380,9 +421,10 @@ class ChainMindStack(Stack):
             backoff_rate=2,
             max_attempts=3,
         )
+        logistics_task.add_catch(failure_task, errors=["States.ALL"], result_path="$.error")
         procurement_task = tasks.LambdaInvoke(
             self,
-            "ProcurementStage",
+            f"{WorkflowState.PROCUREMENT.value.title()}Stage",
             lambda_function=procurement,
             payload=sfn.TaskInput.from_object(
                 {
@@ -400,9 +442,10 @@ class ChainMindStack(Stack):
             backoff_rate=2,
             max_attempts=3,
         )
+        procurement_task.add_catch(failure_task, errors=["States.ALL"], result_path="$.error")
         orchestrator_task = tasks.LambdaInvoke(
             self,
-            "OrchestratorStage",
+            f"{WorkflowState.ORCHESTRATOR.value.title()}Stage",
             lambda_function=orchestrator,
             payload=sfn.TaskInput.from_object(
                 {
@@ -410,6 +453,8 @@ class ChainMindStack(Stack):
                     "inventory": sfn.JsonPath.object_at("$.monitoring.inventory"),
                     "logistics": sfn.JsonPath.object_at("$.logistics"),
                     "procurement": sfn.JsonPath.object_at("$.procurement"),
+                    "workflow": sfn.JsonPath.object_at("$.workflow"),
+                    "approval": sfn.JsonPath.object_at("$.approval"),
                 }
             ),
             payload_response_only=True,
@@ -421,6 +466,7 @@ class ChainMindStack(Stack):
             backoff_rate=2,
             max_attempts=3,
         )
+        orchestrator_task.add_catch(failure_task, errors=["States.ALL"], result_path="$.error")
         approval_task = tasks.LambdaInvoke(
             self,
             "WaitForHumanApproval",
@@ -444,13 +490,155 @@ class ChainMindStack(Stack):
             payload_response_only=True,
             result_path="$.execution",
         )
+        execute_task.add_retry(
+            errors=["States.TaskFailed"],
+            interval=Duration.seconds(2),
+            backoff_rate=2,
+            max_attempts=3,
+        )
+        execute_task.add_catch(failure_task, errors=["States.ALL"], result_path="$.error")
         completed = sfn.Succeed(self, "PurchaseOrderProcessed")
+        execute_success = execute_task.next(completed)
         rejected = sfn.Succeed(self, "PurchaseOrderRejected")
-        decision = sfn.Choice(self, "HumanDecision")
-        decision.when(
-            sfn.Condition.string_equals("$.approval.decision", "approve"),
-            execute_task.next(completed),
-        ).otherwise(rejected)
+        revision_limit = sfn.Succeed(self, "RevisionLimitReached")
+        invalid_decision = sfn.Fail(
+            self,
+            "InvalidApprovalDecision",
+            error="InvalidApprovalDecision",
+            cause="The approval callback returned an unsupported decision.",
+        )
+        decision_after_revision = revision_limit
+        for revision_index in reversed(range(max_revisions + 1)):
+            decision = sfn.Choice(
+                self,
+                f"{WorkflowState.HUMAN_APPROVAL.value.title()}Decision{revision_index}",
+            )
+            decision.when(
+                sfn.Condition.string_equals("$.approval.decision", "approve"),
+                execute_success,
+            ).when(
+                sfn.Condition.string_equals("$.approval.decision", "reject"),
+                rejected,
+            )
+            if revision_index < max_revisions:
+                revision_procurement_task = tasks.LambdaInvoke(
+                    self,
+                    f"RevisedProcurementStage{revision_index + 1}",
+                    lambda_function=procurement,
+                    payload=sfn.TaskInput.from_object(
+                        {
+                            "event": sfn.JsonPath.object_at("$.event"),
+                            "inventory": sfn.JsonPath.object_at("$.monitoring.inventory"),
+                            "logistics": sfn.JsonPath.object_at("$.logistics"),
+                        }
+                    ),
+                    payload_response_only=True,
+                    result_path="$.procurement",
+                )
+                revision_procurement_task.add_retry(
+                    errors=["States.TaskFailed"],
+                    interval=Duration.seconds(2),
+                    backoff_rate=2,
+                    max_attempts=3,
+                )
+                revision_procurement_task.add_catch(
+                    failure_task,
+                    errors=["States.ALL"],
+                    result_path="$.error",
+                )
+                revision_orchestrator_task = tasks.LambdaInvoke(
+                    self,
+                    f"RevisedOrchestratorStage{revision_index + 1}",
+                    lambda_function=orchestrator,
+                    payload=sfn.TaskInput.from_object(
+                        {
+                            "event": sfn.JsonPath.object_at("$.event"),
+                            "inventory": sfn.JsonPath.object_at("$.monitoring.inventory"),
+                            "logistics": sfn.JsonPath.object_at("$.logistics"),
+                            "procurement": sfn.JsonPath.object_at("$.procurement"),
+                            "workflow": sfn.JsonPath.object_at("$.workflow"),
+                            "approval": sfn.JsonPath.object_at("$.approval"),
+                        }
+                    ),
+                    payload_response_only=True,
+                    result_path="$.orchestration",
+                )
+                revision_orchestrator_task.add_retry(
+                    errors=["States.TaskFailed"],
+                    interval=Duration.seconds(2),
+                    backoff_rate=2,
+                    max_attempts=3,
+                )
+                revision_orchestrator_task.add_catch(
+                    failure_task,
+                    errors=["States.ALL"],
+                    result_path="$.error",
+                )
+                update_revision_count = sfn.Pass(
+                    self,
+                    f"UpdateRevisionCount{revision_index + 1}",
+                    parameters={
+                        "revision_count": sfn.JsonPath.number_at("$.orchestration.revision_count")
+                    },
+                    result_path="$.workflow",
+                )
+                revised_approval_task = tasks.LambdaInvoke(
+                    self,
+                    f"WaitForRevisedApproval{revision_index + 1}",
+                    lambda_function=approval_callback,
+                    integration_pattern=sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
+                    payload=sfn.TaskInput.from_object(
+                        {
+                            "run_id": sfn.JsonPath.string_at("$.event.event_id"),
+                            "taskToken": sfn.JsonPath.task_token,
+                            "run": sfn.JsonPath.entire_payload,
+                        }
+                    ),
+                    result_path="$.approval",
+                    task_timeout=sfn.Timeout.duration(Duration.days(7)),
+                )
+                revised_approval_task.add_catch(rejected, errors=["HumanRejected"])
+                revised_approval_task.add_catch(
+                    failure_task,
+                    errors=["States.ALL"],
+                    result_path="$.error",
+                )
+                decision.when(
+                    sfn.Condition.string_equals("$.approval.decision", "revise"),
+                    sfn.Choice(self, f"RevisionLimitCheck{revision_index + 1}")
+                    .when(
+                        sfn.Condition.number_less_than(
+                            "$.workflow.revision_count",
+                            max_revisions,
+                        ),
+                        revision_procurement_task.next(revision_orchestrator_task)
+                        .next(update_revision_count)
+                        .next(revised_approval_task)
+                        .next(decision_after_revision),
+                    )
+                    .otherwise(revision_limit),
+                )
+            else:
+                decision.when(
+                    sfn.Condition.string_equals("$.approval.decision", "revise"),
+                    revision_limit,
+                )
+            decision.otherwise(invalid_decision)
+            decision_after_revision = decision
+        approval_task.add_catch(rejected, errors=["HumanRejected"])
+        approval_task.add_catch(failure_task, errors=["States.ALL"], result_path="$.error")
+        initialize_workflow = sfn.Pass(
+            self,
+            "InitializeWorkflow",
+            result=sfn.Result.from_object({"revision_count": 0}),
+            result_path="$.workflow",
+        )
+        initialize_approval = sfn.Pass(
+            self,
+            "InitializeApprovalDecision",
+            result=sfn.Result.from_object({"decision": ""}),
+            result_path="$.approval",
+        )
         non_significant = sfn.Succeed(self, "DisruptionNotSignificant")
         monitoring_gate = sfn.Choice(self, "DisruptionIsSignificant")
         monitoring_gate.when(
@@ -460,7 +648,22 @@ class ChainMindStack(Stack):
             .next(approval_task)
             .next(decision),
         ).otherwise(non_significant)
-        workflow = monitoring_task.next(monitoring_gate)
+        for current, following in (
+            (WorkflowState.INGESTED, WorkflowState.MONITORING),
+            (WorkflowState.MONITORING, WorkflowState.LOGISTICS),
+            (WorkflowState.MONITORING, WorkflowState.NOT_SIGNIFICANT),
+            (WorkflowState.LOGISTICS, WorkflowState.PROCUREMENT),
+            (WorkflowState.PROCUREMENT, WorkflowState.ORCHESTRATOR),
+            (WorkflowState.ORCHESTRATOR, WorkflowState.HUMAN_APPROVAL),
+            (WorkflowState.HUMAN_APPROVAL, WorkflowState.PROCUREMENT),
+            (WorkflowState.HUMAN_APPROVAL, WorkflowState.EXECUTION),
+            (WorkflowState.HUMAN_APPROVAL, WorkflowState.REJECTED),
+            (WorkflowState.EXECUTION, WorkflowState.COMPLETED),
+        ):
+            validate_transition(current, following)
+        workflow = initialize_workflow.next(
+            initialize_approval.next(monitoring_task.next(monitoring_gate))
+        )
         state_machine = sfn.StateMachine(
             self,
             "DisruptionResolutionStateMachine",
@@ -471,6 +674,12 @@ class ChainMindStack(Stack):
 
         # EventBridge receives external disruption events and starts the four-agent workflow.
         event_bus = events.EventBus(self, "ChainMindDisruptionBus", event_bus_name="chainmind")
+        api_handler.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["events:PutEvents"],
+                resources=[event_bus.event_bus_arn],
+            )
+        )
         for event_publisher in (event_bridge_handler, external_poll):
             event_publisher.add_to_role_policy(
                 iam.PolicyStatement(
@@ -510,7 +719,7 @@ class ChainMindStack(Stack):
             default_cors_preflight_options=apigateway.CorsOptions(
                 allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
                 allow_methods=["GET", "POST", "OPTIONS"],
-                allow_headers=["Content-Type"],
+                allow_headers=["Content-Type", "X-ChainMind-Role"],
             ),
         )
         integration = apigateway.LambdaIntegration(api_handler)
