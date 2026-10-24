@@ -122,6 +122,47 @@ jobs:
       - name: Validate Docker Compose configuration
         run: docker compose config --quiet
 
+  integration:
+    name: LocalStack integration
+    runs-on: ubuntu-latest
+    services:
+      localstack:
+        image: localstack/localstack:3.8.1
+        env:
+          SERVICES: events,stepfunctions,dynamodb,s3,sqs,secretsmanager,ses,lambda,logs
+          AWS_DEFAULT_REGION: us-east-1
+          PERSISTENCE: "0"
+        ports:
+          - 4566:4566
+        options: >-
+          --health-cmd "curl -fsS http://localhost:4566/_localstack/health | grep -q '\"initialized\": true'"
+          --health-interval 5s
+          --health-timeout 10s
+          --health-retries 30
+    env:
+      AWS_ENDPOINT_URL: http://localhost:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+      - name: Install project and development dependencies
+        run: uv sync --extra dev
+      - name: Run LocalStack integration tests
+        run: uv run pytest tests/integration -m integration -q -ra --tb=short
+
   infra:
     name: Infrastructure synthesis
     runs-on: ubuntu-latest

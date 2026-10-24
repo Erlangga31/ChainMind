@@ -29,6 +29,29 @@
 
 `npx --yes aws-cdk synth` hanya memvalidasi template dan menyiapkan asset Lambda lokal; ia tidak membuktikan bahwa AWS menerima atau menjalankan package tersebut. Pytest memeriksa resource dan isi package target. Tidak ada tahap deploy, panggilan AWS runtime, provisioning SAP, atau verifikasi end-to-end AWS dalam workspace ini.
 
+### LocalStack integration checks
+
+The optional Compose profile exercises AWS SDK service contracts against a local emulator. It does
+not create AWS resources or use a real AWS account:
+
+```powershell
+docker compose --profile integration up -d localstack
+$env:AWS_ENDPOINT_URL = "http://localhost:4566"
+$env:AWS_ACCESS_KEY_ID = "test"
+$env:AWS_SECRET_ACCESS_KEY = "test"
+$env:AWS_DEFAULT_REGION = "us-east-1"
+uv run pytest tests/integration -m integration -q
+docker compose --profile integration stop localstack
+```
+
+CI runs the same marked suite in the **LocalStack integration** job. The tests cover EventBridge
+publication/rule configuration, DynamoDB idempotency and run storage, S3 trace/audit archival,
+Step Functions task-token approval via SQS, an SQS dead-letter queue contract, Secrets Manager reads,
+SES message acceptance, and a full mock-SAP/mock-LLM disruption pipeline persisted in DynamoDB. These
+checks do not prove AWS IAM policy behavior, service quotas, delivery to external email, or equivalence
+with AWS production. The EventBridge test calls the Lambda-shaped handler locally; it does not prove
+an actual Lambda container invocation. LocalStack results remain distinct from real-AWS verification.
+
 ## Perintah berisiko
 
 - `npx --yes aws-cdk deploy` membuat atau mengubah resource berbayar dan membutuhkan kredensial AWS.
