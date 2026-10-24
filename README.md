@@ -288,11 +288,12 @@ chainmind/
 
 - [x] Tambahkan konfirmasi Ariba, ASN/ETA, proyeksi stok ilustratif, dan endpoint KPI; kontrak HTTP hanya diverifikasi terhadap sandbox.
 - [ ] Validasi custom API tracking dan seluruh mapping OData pada tenant SAP Integration Suite/Ariba yang nyata.
-- [ ] Paketkan dependency Python untuk Lambda deployment dan verifikasi runtime Python 3.12.
+- [x] Paketkan dependency Python sebagai asset Lambda Linux/Python 3.12 dan uji isi asset; tetap perlu verifikasi deployment nyata.
 - [x] Hubungkan endpoint approval ke callback token Step Functions (`SendTaskSuccess`/`SendTaskFailure`) dan tambahkan idempotensi.
 - [x] Tambahkan Cognito authorizer/group scaffold, KMS, private VPC endpoints, CloudTrail, audit archive, retention, alarms, dan CloudWatch dashboard (synth-only).
-- [ ] Hubungkan dashboard ke OAuth/PKCE dan uji akses viewer/approver Cognito end-to-end.
-- [ ] Jalankan cdk-nag, selesaikan Lambda runtime dependency packaging, dan review security findings.
+- [x] Tambahkan fake OIDC/OAuth PKCE untuk viewer/approver dan uji alur dashboard lokal; federation Cognito/IAS nyata belum diuji.
+- [x] Jalankan cdk-nag AwsSolutions dengan alasan suppression tertulis dan tambahkan assertion CDK.
+- [x] Tambahkan launcher lokal Windows, naskah demo/pitch, dan screenshot dashboard.
 - [ ] Uji deduplikasi serentak, rotasi HMAC, dan alur event end-to-end dalam akun AWS.
 
 **Disclaimer MVP:** integrasi SAP saat ini adalah mock/stub; seed data, event store mock, dan keputusan human-in-the-loop lokal dimaksudkan untuk demo. AWS CDK adalah scaffold yang dapat disintesis, bukan deployment atau sertifikasi kesiapan produksi.
@@ -306,23 +307,24 @@ menyediakan timeout Step Functions sebagai eskalasi cadangan.
 
 ## Proposal coverage matrix
 
-PDF proposal belum tersedia di `docs/reference/`; status berikut berasal dari requirements tertulis dan belum dibandingkan dengan dokumen sumber.
+Berdasarkan proposal lokal di `docs/reference/ChainMind_Proposal.pdf`, matriks berikut menyeimbangkan apa yang sudah benar-benar dibuat di repository dengan status mock/sandbox/synth-only yang sesuai. Tidak ada klaim verifikasi AWS atau SAP tenant nyata.
 
-| Section prompt | Status | Bukti | Verifikasi |
+| Section proposal | Status | Bukti utama | Verifikasi |
 | --- | --- | --- | --- |
-| 3 — konsep dan skenario | Partially | [demo pipeline](./tests/test_demo_pipeline.py), [seed data](./src/chainmind/data/) | unit-tested |
-| 5 — agent dan action groups | Partially | [agents](./src/chainmind/agents/), [CDK stack](./infra/chainmind_stack.py) | unit-tested, synth-only |
-| 6 — workflow dan approval | Partially | [workflow](./src/chainmind/workflow/), [approval handler](./src/chainmind/handlers/approval.py) | unit-tested, synth-only |
-| 7 — SAP/Ariba | Partially | [SAP sandbox](./sandbox/sap_sandbox/), [SAP clients](./src/chainmind/integrations/sap/) | sandbox-verified; needs real SAP |
-| 8 — notifikasi | Partially | [notification adapters](./src/chainmind/notifications/), [tests](./tests/test_notifications.py) | unit-tested; live channels need real accounts |
-| 9 — security/operations | Partially | [CDK stack](./infra/chainmind_stack.py), [deployment notes](./docs/DEPLOY.md) | synth-only; no deployment/security certification |
-| 10 — dashboard/demo | Partially | [dashboard](./dashboard/src/), [demo guide](./docs/DEMO.md) | unit-tested, build; mock roles only |
-| 11 — business model | Partially | [business draft](./docs/BUSINESS.md) | documentation-only, assumptions TBD |
-| 12 — KPI framework | Partially | [KPI API](./src/chainmind/api/main.py), [KPI models](./src/chainmind/core/models.py) | unit-tested; illustrative only |
-| 13 — proposal-specific item | Not implemented | [coverage limitations](./docs/COVERAGE.md) | needs proposal PDF |
-| 15 — risk | Partially | [risk register draft](./docs/BUSINESS.md) | prompt-derived, not formally reviewed |
+| 3 — konsep dan skenario | Implemented | [demo pipeline](./tests/test_demo_pipeline.py), [seed data](./src/chainmind/data/) | unit-tested |
+| 5 — agent dan action groups | Implemented (mock) | [agents](./src/chainmind/agents/), [CDK stack](./infra/chainmind_stack.py) | unit-tested, synth-only |
+| 6 — workflow dan approval | Implemented (mock) | [workflow](./src/chainmind/workflow/), [approval API](./src/chainmind/api/main.py) | unit-tested, synth-only |
+| 7 — SAP/Ariba | Partial | [SAP sandbox](./sandbox/sap_sandbox/), [SAP clients](./src/chainmind/integrations/sap/) | sandbox-verified; needs real SAP |
+| 8 — notifikasi dan human approval | Implemented | [notification adapters](./src/chainmind/notifications/), [dashboard approval flow](./dashboard/src/) | unit-tested, Playwright, mock channels |
+| 9 — keamanan/operations | Partial | [JWT validation](./src/chainmind/api/), [CDK stack](./infra/chainmind_stack.py), [DEPLOY.md](./docs/DEPLOY.md) | synth-only; no live AWS/security certification |
+| 10 — dashboard/demo | Implemented | [dashboard](./dashboard/src/), [demo guide](./docs/DEMO.md), [screenshots](./docs/screenshots/) | unit-tested, build, Playwright |
+| 11 — model bisnis | Partial | [business draft](./docs/BUSINESS.md) | documentation-only, assumptions TBD |
+| 12 — KPI framework | Implemented | [KPI API](./src/chainmind/api/main.py), [KPI models](./src/chainmind/core/models.py), [dashboard KPI page](./dashboard/src/) | unit-tested; illustrative only |
+| 13 — roadmap implementasi dan MVP | Partial | [demo guide](./docs/DEMO.md), [coverage audit](./docs/COVERAGE.md) | demo/sandbox verified; SAP BTP pilot remains a prerequisite |
+| 15 — risk | Partial | [risk register draft](./docs/BUSINESS.md) | documentation-only |
+| 16 — pendanaan / placeholders | Partial | [business draft](./docs/BUSINESS.md) | placeholders; no validated budget |
 
-Lihat [docs/COVERAGE.md](./docs/COVERAGE.md) untuk audit prompt-derived yang lebih rinci dan [docs/BUSINESS.md](./docs/BUSINESS.md) untuk hipotesis bisnis.
+Lihat [docs/COVERAGE.md](./docs/COVERAGE.md) untuk audit yang lebih rinci serta [docs/BUSINESS.md](./docs/BUSINESS.md) untuk hipotesis bisnis, KPI, dan risiko yang masih bersifat ilustratif.
 
 ## Kontribusi
 
@@ -330,4 +332,4 @@ Lihat [CONTRIBUTING.md](./CONTRIBUTING.md) untuk langkah instalasi, pemeriksaan,
 
 ## License
 
-Proyek ini menggunakan MIT License; sebelum publikasi, ganti placeholder `<YOUR NAME>` di [LICENSE](./LICENSE) dengan nama pemegang hak cipta.
+Proyek ini menggunakan MIT License dengan pemegang hak cipta `Erlangga31` pada [LICENSE](./LICENSE).
