@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ChainMind SAP Ariba sourcing, confirmation, and ASN adapter contract",
+  "description": "The /ariba/* paths and response bodies are ChainMind custom Integration Suite adapter APIs, not a claim of a universal SAP Ariba Network OData contract. Supplier, OrderQuantity, NetPriceAmount, and DocumentCurrency use SAP-style names where applicable.",
+  "oneOf": [
+    {
+      "title": "Custom purchase-order acknowledgement",
+      "type": "object",
+      "required": ["d"],
+      "properties": {
+        "d": {
+          "type": "object",
+          "required": ["ariba_reference", "__metadata"],
+          "properties": {
+            "ariba_reference": {"type": "string"},
+            "__metadata": {"type": "object"}
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    {
+      "title": "Custom sourcing collection",
+      "type": "object",
+      "required": ["d"],
+      "properties": {
+        "d": {
+          "type": "object",
+          "required": ["results"],
+          "properties": {
+            "results": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["vendor_id", "Supplier", "SupplierName", "lead_time_days", "total_cost", "capacity", "risk_score"],
+                "properties": {
+                  "vendor_id": {"type": "string", "description": "ChainMind custom key."},
+                  "Supplier": {"type": "string"},
+                  "SupplierName": {"type": "string"},
+                  "lead_time_days": {"type": "number", "description": "ChainMind custom quote field."},
+                  "total_cost": {"type": "number", "description": "ChainMind custom quote total."},
+                  "NetPriceAmount": {"type": "number"},
+                  "DocumentCurrency": {"type": "string"},
+                  "capacity": {"type": "integer"},
+                  "risk_score": {"type": "integer"}
+                },
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Custom purchase-order confirmation",
+      "type": "object",
+      "required": ["d"],
+      "properties": {
+        "d": {
+          "type": "object",
+          "required": ["PurchaseOrder", "Supplier", "confirmation_status", "confirmed_quantity"],
+          "properties": {
+            "PurchaseOrder": {"type": "string"},
+            "Supplier": {"type": "string"},
+            "confirmation_status": {"type": "string"},
+            "confirmed_quantity": {"type": "integer"},
+            "note": {"type": "string"}
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    {
+      "title": "Custom advance ship notice",
+      "type": "object",
+      "required": ["d"],
+      "properties": {
+        "d": {
+          "type": "object",
+          "required": ["PurchaseOrder", "asn_id", "status", "estimated_arrival"],
+          "properties": {
+            "PurchaseOrder": {"type": "string"},
+            "asn_id": {"type": "string", "description": "ChainMind custom ASN identifier."},
+            "status": {"type": "string"},
+            "estimated_arrival": {"type": "string", "format": "date"},
+            "note": {"type": "string"}
+          },
+          "additionalProperties": true
+        }
+      }
+    }
+  ]
+}

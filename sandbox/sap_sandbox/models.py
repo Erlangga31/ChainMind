@@ -17,6 +17,10 @@ class MaterialStock(SandboxModel):
     """Material stock and consumption fields exposed as OData properties."""
 
     Material: str
+    Plant: str = "1000"
+    StorageLocation: str = "0001"
+    MatlWrhsStkQtyInMatBaseUnit: int = Field(ge=0)
+    MaterialBaseUnit: str = "EA"
     MaterialName: str
     UnrestrictedStock: int = Field(ge=0)
     DailyConsumption: int = Field(gt=0)

@@ -70,7 +70,7 @@ flowchart LR
 | Approval dan eksekusi | API/dashboard dan mock SAP | Step Functions callback, otorisasi manusia, SAP S/4HANA |
 | Pelacakan pasca-eksekusi | Konfirmasi Ariba, ASN, proyeksi stok terpisah dari stok aktual | Lambda pelacakan, Ariba, custom API proyeksi S/4HANA |
 
-Sandbox SAP lokal pada `sandbox/sap_sandbox/` menyediakan endpoint OData, vendor Ariba, webhook Event Mesh, dan workflow approval simulasi. Sandbox ini membantu pengujian kontrak HTTP lokal; bukan koneksi atau tenant SAP produksi.
+Sandbox SAP lokal pada `sandbox/sap_sandbox/` menyediakan endpoint OData V2, metadata EDMX, kontrak JSON Schema di `contracts/sap/`, vendor Ariba, webhook Event Mesh, dan workflow approval simulasi. Uji adapter menggunakan field standar SAP (misalnya `Material`, `Supplier`, `OrderQuantity`, dan `NetPriceAmount`) serta menandai ekstensi `ChainMind*` sebagai custom. Ini adalah contract/sandbox test, bukan koneksi atau tenant SAP produksi. Smoke test tenant opsional didokumentasikan di [DEPLOY.md](./docs/DEPLOY.md); tidak berjalan otomatis dan perlu URL/kredensial SAP yang diberikan pemilik tenant.
 
 Event Mesh simulator mengirim event ke `/event-bridge` dengan HMAC-SHA256. Untuk menjalankan kedua proses lokal, isi `CHAINMIND_EVENT_BRIDGE_SECRET` dan `SAP_SANDBOX_EVENT_BRIDGE_SECRET` dengan shared secret yang sama dan non-empty. `OpenMeteoWeatherClient` adalah integrasi opsional yang disabled by default; sumber gangguan lain memakai skenario mock offline.
 
@@ -268,7 +268,8 @@ chainmind/
 ├── dashboard/               # React + TypeScript + Vite + Tailwind
 ├── docs/                    # Arsitektur, API, dan skenario presentasi
 ├── infra/                    # AWS CDK untuk Python
-├── scripts/                  # Demo CLI
+├── scripts/                  # Demo CLI, launcher, verifier tenant SAP opt-in
+├── contracts/sap/            # JSON Schema untuk mapping OData/adapter SAP
 ├── sandbox/sap_sandbox/      # Simulator lokal OData, Ariba, Event Mesh, workflow
 ├── src/chainmind/
 │   ├── agents/               # Monitoring, logistics, procurement, orchestrator, tracking
@@ -294,7 +295,9 @@ chainmind/
 - [x] Tambahkan fake OIDC/OAuth PKCE untuk viewer/approver dan uji alur dashboard lokal; federation Cognito/IAS nyata belum diuji.
 - [x] Jalankan cdk-nag AwsSolutions dengan alasan suppression tertulis dan tambahkan assertion CDK.
 - [x] Tambahkan launcher lokal Windows, naskah demo/pitch, dan screenshot dashboard.
+- [x] Verifikasi contract mapping OData sandbox, respons Ariba OData envelope, dan sediakan live smoke test tenant yang opt-in.
 - [ ] Uji deduplikasi serentak, rotasi HMAC, dan alur event end-to-end dalam akun AWS.
+- [ ] Jalankan `scripts/verify_sap_tenant.py` dengan tenant SAP/BTP uji yang disetujui.
 
 **Disclaimer MVP:** integrasi SAP saat ini adalah mock/stub; seed data, event store mock, dan keputusan human-in-the-loop lokal dimaksudkan untuk demo. AWS CDK adalah scaffold yang dapat disintesis, bukan deployment atau sertifikasi kesiapan produksi.
 

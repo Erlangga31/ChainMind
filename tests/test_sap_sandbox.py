@@ -56,7 +56,14 @@ def test_s4hana_exposes_stock_and_odata_query_options() -> None:
 
     assert response.status_code == 200
     assert response.json()["d"]["results"] == [
-        {"Material": "microchip-x", "DailyConsumption": 1000}
+        {
+            "Material": "microchip-x",
+            "DailyConsumption": 1000,
+            "__metadata": {
+                "uri": "A_MaterialStock('microchip-x')",
+                "type": "API_MATERIAL_STOCK_SRV.A_MaterialStock",
+            },
+        }
     ]
     assert (
         client.get(

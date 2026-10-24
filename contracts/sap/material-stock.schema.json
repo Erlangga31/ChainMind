@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SAP S/4HANA API_MATERIAL_STOCK_SRV A_MaterialStock OData V2 collection",
+  "description": "Standard SAP properties are named by the released material stock API. DailyConsumption, LineStoppageCostPerDay, PurchaseQuantity, and PurchaseTerms are ChainMind sandbox extensions, not standard SAP fields.",
+  "type": "object",
+  "required": ["d"],
+  "properties": {
+    "d": {
+      "type": "object",
+      "required": ["results"],
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["__metadata", "Material", "Plant", "StorageLocation", "MatlWrhsStkQtyInMatBaseUnit", "MaterialBaseUnit"],
+            "properties": {
+              "__metadata": {"$ref": "#/$defs/metadata"},
+              "Material": {"type": "string"},
+              "Plant": {"type": "string"},
+              "StorageLocation": {"type": "string"},
+              "MatlWrhsStkQtyInMatBaseUnit": {"type": "number"},
+              "MaterialBaseUnit": {"type": "string"},
+              "MaterialName": {"type": "string", "description": "ChainMind sandbox alias for a material-description lookup."},
+              "DailyConsumption": {"type": "number", "description": "ChainMind custom extension."},
+              "LineStoppageCostPerDay": {"type": "number", "description": "ChainMind custom extension."},
+              "PurchaseQuantity": {"type": "number", "description": "ChainMind custom extension."},
+              "Currency": {"type": "string"},
+              "PurchaseTerms": {"type": "string", "description": "ChainMind custom extension."}
+            },
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "required": ["uri", "type"],
+      "properties": {
+        "uri": {"type": "string"},
+        "type": {"type": "string"}
+      },
+      "additionalProperties": true
+    }
+  }
+}

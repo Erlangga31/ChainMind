@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ChainMind SAP purchase-order create request mapping",
+  "description": "SAP standard properties are PurchaseOrder, PurchaseOrderItem, Supplier, Material, OrderQuantity, NetPriceAmount, and DocumentCurrency. ChainMind* properties are custom adapter extensions required for the demo's display identifier, descriptions, total, status, and freight terms; map them to tenant-approved fields before production.",
+  "type": "object",
+  "required": ["PurchaseOrder", "PurchaseOrderItem", "Supplier", "Material", "OrderQuantity", "NetPriceAmount", "DocumentCurrency", "ChainMindPurchaseOrderId", "ChainMindTotalPrice"],
+  "properties": {
+    "PurchaseOrder": {"type": "string"},
+    "PurchaseOrderItem": {"type": "string"},
+    "Supplier": {"type": "string"},
+    "Material": {"type": "string"},
+    "OrderQuantity": {"type": "integer", "minimum": 1},
+    "NetPriceAmount": {"type": "number", "exclusiveMinimum": 0},
+    "DocumentCurrency": {"type": "string", "minLength": 3, "maxLength": 3},
+    "ChainMindPurchaseOrderId": {"type": "string"},
+    "ChainMindVendorName": {"type": "string"},
+    "ChainMindMaterialName": {"type": "string"},
+    "ChainMindTotalPrice": {"type": "number", "exclusiveMinimum": 0},
+    "ChainMindStatus": {"type": "string"},
+    "ChainMindTerms": {"type": "string"}
+  },
+  "additionalProperties": false
+}

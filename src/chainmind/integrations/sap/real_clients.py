@@ -106,7 +106,46 @@ def _odata_results(payload: dict[str, Any]) -> list[dict[str, Any]]:
         raise IntegrationError("SAP OData response has an invalid entity shape.")
     if not all(isinstance(item, dict) for item in values):
         raise IntegrationError("SAP OData response contains an invalid entity.")
-    return values
+    return [{key: value for key, value in item.items() if key != "__metadata"} for item in values]
+
+
+def _odata_entity(payload: dict[str, Any]) -> dict[str, Any]:
+    entity = payload.get("d", payload)
+    if not isinstance(entity, dict):
+        raise IntegrationError("SAP OData response has an invalid entity shape.")
+    return {key: value for key, value in entity.items() if key != "__metadata"}
+
+
+def _purchase_order_from_odata(entity: dict[str, Any]) -> PurchaseOrder:
+    """Translate standard SAP fields and explicitly documented ChainMind extensions."""
+
+    quantity = entity.get("quantity", entity.get("OrderQuantity"))
+    unit_price = entity.get("unit_price", entity.get("NetPriceAmount"))
+    total_price = entity.get("total_price", entity.get("ChainMindTotalPrice"))
+    if total_price is None and quantity is not None and unit_price is not None:
+        total_price = quantity * unit_price
+    return PurchaseOrder.model_validate(
+        {
+            "po_id": entity.get(
+                "po_id",
+                entity.get("ChainMindPurchaseOrderId", entity.get("PurchaseOrder")),
+            ),
+            "sap_reference": entity.get("sap_reference", entity.get("PurchaseOrder")),
+            "vendor_id": entity.get("vendor_id", entity.get("Supplier")),
+            "vendor_name": entity.get("vendor_name", entity.get("ChainMindVendorName", "")),
+            "component_id": entity.get("component_id", entity.get("Material")),
+            "component_name": entity.get(
+                "component_name",
+                entity.get("ChainMindMaterialName", ""),
+            ),
+            "quantity": quantity,
+            "unit_price": unit_price,
+            "total_price": total_price,
+            "currency": entity.get("currency", entity.get("DocumentCurrency", "USD")),
+            "terms": entity.get("terms", entity.get("ChainMindTerms", "Air Freight")),
+            "status": entity.get("status", entity.get("ChainMindStatus", "PENDING_APPROVAL")),
+        }
+    )
 
 
 def _map_error(exc: ValidationError, entity: str) -> IntegrationError:
@@ -158,10 +197,16 @@ class RealS4HANAClient:
                         entity.get("MaterialNumber", entity.get("component_id")),
                     ),
                     "component_name": entity.get(
-                        "MaterialName",
-                        entity.get("MaterialDescription", entity.get("component_name")),
+                        "MaterialDescription",
+                        entity.get(
+                            "MaterialName",
+                            entity.get("component_name"),
+                        ),
                     ),
-                    "current_stock": entity.get("UnrestrictedStock", entity.get("CurrentStock")),
+                    "current_stock": entity.get(
+                        "MatlWrhsStkQtyInMatBaseUnit",
+                        entity.get("UnrestrictedStock", entity.get("CurrentStock")),
+                    ),
                     "daily_consumption": entity.get("DailyConsumption"),
                     "line_stoppage_cost_per_day": entity.get("LineStoppageCostPerDay"),
                     "purchase_quantity": entity.get("PurchaseQuantity"),
@@ -213,12 +258,26 @@ class RealS4HANAClient:
         response = self._transport.request(
             "POST",
             PURCHASE_ORDER_PATH,
-            json_body=draft.model_dump(mode="json"),
+            json_body={
+                "PurchaseOrder": str(draft.po_id),
+                "PurchaseOrderItem": "00010",
+                "Supplier": draft.vendor_id,
+                "Material": draft.component_id,
+                "OrderQuantity": draft.quantity,
+                "NetPriceAmount": draft.unit_price,
+                "DocumentCurrency": draft.currency,
+                "ChainMindPurchaseOrderId": str(draft.po_id),
+                "ChainMindVendorName": draft.vendor_name,
+                "ChainMindMaterialName": draft.component_name,
+                "ChainMindTotalPrice": draft.total_price,
+                "ChainMindStatus": "PENDING_APPROVAL",
+                "ChainMindTerms": draft.terms,
+            },
             csrf=True,
         )
-        entity = response.get("d", response)
+        entity = _odata_entity(response)
         try:
-            return PurchaseOrder.model_validate(entity)
+            return _purchase_order_from_odata(entity)
         except ValidationError as exc:
             raise _map_error(exc, "purchase order") from exc
 
@@ -233,7 +292,7 @@ class RealS4HANAClient:
             csrf=True,
         )
         entity = response.get("d", response)
-        reference = entity.get("sap_reference") if isinstance(entity, dict) else None
+        reference = entity.get("sap_reference", entity.get("PurchaseOrder"))
         return str(reference or f"SAP-PO-{order.po_id}")
 
     def record_inventory_projection(self, projection: InventoryProjection) -> None:
@@ -263,7 +322,28 @@ class RealAribaClient:
 
         payload = self._transport.request("GET", ARIBA_VENDOR_PATH)
         try:
-            return [Vendor.model_validate(item) for item in _odata_results(payload)]
+            return [
+                Vendor.model_validate(
+                    {
+                        "vendor_id": item.get("vendor_id", item.get("Supplier")),
+                        "vendor_name": item.get(
+                            "vendor_name",
+                            item.get("SupplierName", item.get("VendorName")),
+                        ),
+                        "lead_time_days": item.get("lead_time_days", item.get("LeadTimeDays")),
+                        "total_cost": item.get("total_cost", item.get("NetPriceAmount")),
+                        "currency": item.get(
+                            "currency",
+                            item.get("DocumentCurrency", "USD"),
+                        ),
+                        "risk_score": item.get("risk_score", item.get("RiskScore")),
+                        "capacity": item.get("capacity", item.get("Capacity")),
+                        "expedite_cost": item.get("expedite_cost", item.get("ExpediteCost", 0)),
+                        "freight_cost": item.get("freight_cost", item.get("FreightCost", 0)),
+                    }
+                )
+                for item in _odata_results(payload)
+            ]
         except ValidationError as exc:
             raise _map_error(exc, "vendor") from exc
 
@@ -275,7 +355,7 @@ class RealAribaClient:
             ARIBA_PURCHASE_ORDER_PATH,
             json_body=order.model_dump(mode="json"),
         )
-        entity = response.get("d", response)
+        entity = _odata_entity(response)
         reference = entity.get("ariba_reference") if isinstance(entity, dict) else None
         if not reference:
             raise IntegrationError("SAP Ariba did not return a purchase-order reference.")
@@ -288,12 +368,18 @@ class RealAribaClient:
             "GET",
             f"{ARIBA_PURCHASE_ORDER_PATH}/{quote(str(order.po_id), safe='')}/confirmation",
         )
-        entity = response.get("d", response)
+        entity = _odata_entity(response)
         try:
             return VendorConfirmation.model_validate(
                 {
-                    "confirmation_status": entity.get("confirmation_status"),
-                    "confirmed_quantity": entity.get("confirmed_quantity"),
+                    "confirmation_status": entity.get(
+                        "confirmation_status",
+                        entity.get("ConfirmationStatus"),
+                    ),
+                    "confirmed_quantity": entity.get(
+                        "confirmed_quantity",
+                        entity.get("ConfirmedQuantity", entity.get("OrderQuantity")),
+                    ),
                     "note": entity.get("note", ""),
                 }
             )
@@ -311,7 +397,10 @@ class RealAribaClient:
         try:
             return ShipmentTracking.model_validate(
                 {
-                    "tracking_id": entity.get("tracking_id", entity.get("asn_id")),
+                    "tracking_id": entity.get(
+                        "tracking_id",
+                        entity.get("asn_id", entity.get("AdvanceShipNotice")),
+                    ),
                     "status": entity.get("status"),
                     "estimated_arrival": entity.get("estimated_arrival"),
                     "note": entity.get("note", ""),

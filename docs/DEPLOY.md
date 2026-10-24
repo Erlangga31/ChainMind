@@ -52,6 +52,59 @@ checks do not prove AWS IAM policy behavior, service quotas, delivery to externa
 with AWS production. The EventBridge test calls the Lambda-shaped handler locally; it does not prove
 an actual Lambda container invocation. LocalStack results remain distinct from real-AWS verification.
 
+### Kontrak SAP dan smoke test opt-in
+
+Kontrak JSON Schema di `contracts/sap/` membedakan nama field standar SAP dari ekstensi khusus
+ChainMind. S/4HANA sandbox menyajikan envelope OData V2, metadata EDMX, material stock, purchase
+order, dan supplier. Endpoint `/ariba/*` adalah adapter khusus ChainMind melalui Integration Suite,
+bukan klaim bahwa semua tenant Ariba menyediakan API OData universal. Periksa kontrak dan mapping
+tenant bersama pemilik SAP sebelum membuat destination produksi.
+
+Smoke test live bersifat opt-in dan tidak dijalankan oleh demo atau suite default. Jangan jalankan
+perintah ini sebelum pemilik tenant memberikan URL dan kredensial khusus untuk lingkungan uji:
+
+```powershell
+$env:SAP_LIVE_BASE_URL = "https://<integration-suite-host>"
+$env:SAP_LIVE_TOKEN_URL = "https://<oauth-token-endpoint>"
+$env:SAP_LIVE_CLIENT_ID = "<client-id>"
+$env:SAP_LIVE_CLIENT_SECRET = "<secret-from-approved-secret-store>"
+uv run python scripts/verify_sap_tenant.py
+uv run pytest tests/integration/test_live_sap.py -m live_sap -q
+```
+
+Script mengambil token client-credentials, memeriksa `$metadata` untuk tiga service OData S/4HANA
+serta adapter Ariba, dan melakukan satu GET per service. Path dapat diubah melalui environment
+`SAP_LIVE_MATERIAL_METADATA_PATH`, `SAP_LIVE_PURCHASE_ORDER_METADATA_PATH`,
+`SAP_LIVE_BUSINESS_PARTNER_METADATA_PATH`, `SAP_LIVE_ARIBA_METADATA_PATH`,
+`SAP_LIVE_MATERIAL_READ_PATH`, `SAP_LIVE_PURCHASE_ORDER_READ_PATH`,
+`SAP_LIVE_BUSINESS_PARTNER_READ_PATH`, dan `SAP_LIVE_ARIBA_READ_PATH`. Pastikan service hanya
+mengizinkan operasi baca untuk smoke test. Output tidak menampilkan token atau secret. Hapus
+environment variables setelah selesai; jangan simpan kredensial di `.env` atau Git.
+
+The SAP sandbox/schema tests are `sandbox-verified`; the live smoke test requires a real SAP BTP
+Integration Suite tenant and remains **needs real SAP** until explicitly run by its owner.
+
+### AWS account verifier (read-only preflight)
+
+Set AWS credentials through the approved AWS credential provider chain, then configure resource IDs
+only if those resources exist in the target account:
+
+```powershell
+$env:AWS_REGION = "us-east-1"
+$env:CHAINMIND_BEDROCK_MODEL_ID = "<foundation-model-id>"
+$env:CHAINMIND_BEDROCK_AGENT_ID = "<agent-id>"
+$env:CHAINMIND_BEDROCK_AGENT_ALIAS_ID = "<agent-alias-id>"
+$env:CHAINMIND_EVENT_BUS_NAME = "chainmind"
+$env:CHAINMIND_STATE_MACHINE_ARN = "<state-machine-arn>"
+uv run python scripts/verify_aws_account.py
+```
+
+The verifier reads STS identity, the regional Bedrock model catalog, configured Bedrock agent/alias,
+EventBridge bus, and Step Functions state machine. A model being listed does **not** prove invocation
+access; it never calls `InvokeAgent` or `InvokeModel`. EventBridge `PutEvents` has no AWS dry-run API,
+so the verifier explicitly reports that check as skipped and sends no event. Use a separately approved
+staging runbook for paid or mutating runtime checks. This script has not been run against a real account.
+
 ## Perintah berisiko
 
 - `npx --yes aws-cdk deploy` membuat atau mengubah resource berbayar dan membutuhkan kredensial AWS.

@@ -20,6 +20,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 from sap_sandbox.config import SandboxSettings, get_sandbox_settings
 from sap_sandbox.models import (
     EventMeshPublishRequest,
@@ -141,6 +142,159 @@ def load_vendors() -> list[Vendor]:
     return [Vendor.model_validate(item) for item in json.loads(raw)]
 
 
+def _odata_entity(entity: dict[str, Any], *, uri: str, entity_type: str) -> dict[str, Any]:
+    return {
+        **entity,
+        "__metadata": {
+            "uri": uri,
+            "type": entity_type,
+        },
+    }
+
+
+def _purchase_order_entity(order: PurchaseOrder | dict[str, Any]) -> dict[str, Any]:
+    data = order.model_dump(mode="json") if isinstance(order, PurchaseOrder) else dict(order)
+    purchase_order_id = str(data.get("po_id") or data.get("PurchaseOrder") or "")
+    standard_fields = {
+        "PurchaseOrder": str(data.get("PurchaseOrder") or purchase_order_id),
+        "PurchaseOrderItem": str(data.get("PurchaseOrderItem") or "00010"),
+        "Supplier": str(data.get("vendor_id") or data.get("Supplier") or ""),
+        "Material": str(data.get("component_id") or data.get("Material") or ""),
+        "OrderQuantity": data.get("quantity", data.get("OrderQuantity", 0)),
+        "NetPriceAmount": data.get("unit_price", data.get("NetPriceAmount", 0)),
+        "DocumentCurrency": str(data.get("currency") or data.get("DocumentCurrency") or "USD"),
+        "ChainMindPurchaseOrderId": purchase_order_id,
+        "ChainMindVendorName": data.get("vendor_name", ""),
+        "ChainMindMaterialName": data.get("component_name", ""),
+        "ChainMindStatus": data.get("status", ""),
+        "ChainMindTerms": data.get("terms", ""),
+        "ChainMindTotalPrice": data.get("total_price", 0),
+    }
+    return _odata_entity(
+        {**data, **standard_fields},
+        uri=f"A_PurchaseOrder('{purchase_order_id}')",
+        entity_type="API_PURCHASEORDER_PROCESS_SRV.A_PurchaseOrder",
+    )
+
+
+def _ariba_vendor_entity(vendor: Vendor) -> dict[str, Any]:
+    return {
+        **vendor.model_dump(mode="json"),
+        "Supplier": vendor.vendor_id,
+        "SupplierName": vendor.vendor_name,
+        "LeadTimeDays": vendor.lead_time_days,
+        "NetPriceAmount": vendor.total_cost,
+        "DocumentCurrency": vendor.currency,
+        "Capacity": vendor.capacity,
+        "RiskScore": vendor.risk_score,
+    }
+
+
+def _material_stock_edmx() -> str:
+    return """<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="1.0" xmlns:edmx="http://schemas.microsoft.com/ado/2007/06/edmx">
+  <edmx:DataServices m:DataServiceVersion="2.0"
+      xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata">
+    <Schema Namespace="API_MATERIAL_STOCK_SRV"
+        xmlns="http://schemas.microsoft.com/ado/2008/09/edm">
+      <EntityType Name="A_MaterialStock">
+        <Key>
+          <PropertyRef Name="Material"/>
+          <PropertyRef Name="Plant"/>
+          <PropertyRef Name="StorageLocation"/>
+        </Key>
+        <Property Name="Material" Type="Edm.String" Nullable="false"/>
+        <Property Name="Plant" Type="Edm.String" Nullable="false"/>
+        <Property Name="StorageLocation" Type="Edm.String" Nullable="false"/>
+        <Property Name="MatlWrhsStkQtyInMatBaseUnit" Type="Edm.Decimal"/>
+        <Property Name="MaterialBaseUnit" Type="Edm.String"/>
+        <Property Name="DailyConsumption" Type="Edm.Decimal"/>
+        <Property Name="LineStoppageCostPerDay" Type="Edm.Decimal"/>
+        <Property Name="PurchaseQuantity" Type="Edm.Decimal"/>
+      </EntityType>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>"""
+
+
+def _purchase_order_edmx() -> str:
+    return """<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="1.0" xmlns:edmx="http://schemas.microsoft.com/ado/2007/06/edmx">
+  <edmx:DataServices m:DataServiceVersion="2.0"
+      xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata">
+    <Schema Namespace="API_PURCHASEORDER_PROCESS_SRV"
+        xmlns="http://schemas.microsoft.com/ado/2008/09/edm">
+      <EntityType Name="A_PurchaseOrder">
+        <Key>
+          <PropertyRef Name="PurchaseOrder"/>
+          <PropertyRef Name="PurchaseOrderItem"/>
+        </Key>
+        <Property Name="PurchaseOrder" Type="Edm.String" Nullable="false"/>
+        <Property Name="PurchaseOrderItem" Type="Edm.String" Nullable="false"/>
+        <Property Name="Supplier" Type="Edm.String"/>
+        <Property Name="Material" Type="Edm.String"/>
+        <Property Name="OrderQuantity" Type="Edm.Decimal"/>
+        <Property Name="NetPriceAmount" Type="Edm.Decimal"/>
+        <Property Name="DocumentCurrency" Type="Edm.String"/>
+      </EntityType>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>"""
+
+
+def _business_partner_edmx() -> str:
+    return """<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="1.0" xmlns:edmx="http://schemas.microsoft.com/ado/2007/06/edmx">
+  <edmx:DataServices m:DataServiceVersion="2.0"
+      xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata">
+    <Schema Namespace="API_BUSINESS_PARTNER"
+        xmlns="http://schemas.microsoft.com/ado/2008/09/edm">
+      <EntityType Name="A_Supplier">
+        <Key><PropertyRef Name="Supplier"/></Key>
+        <Property Name="Supplier" Type="Edm.String" Nullable="false"/>
+        <Property Name="SupplierName" Type="Edm.String"/>
+      </EntityType>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>"""
+
+
+def _ariba_edmx() -> str:
+    return """<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="1.0" xmlns:edmx="http://schemas.microsoft.com/ado/2007/06/edmx">
+  <edmx:DataServices m:DataServiceVersion="2.0"
+      xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata">
+    <Schema Namespace="CHAINMIND_ARIBA_ADAPTER"
+        xmlns="http://schemas.microsoft.com/ado/2008/09/edm">
+      <EntityType Name="SupplierOffer">
+        <Key><PropertyRef Name="Supplier"/></Key>
+        <Property Name="Supplier" Type="Edm.String" Nullable="false"/>
+        <Property Name="SupplierName" Type="Edm.String"/>
+        <Property Name="LeadTimeDays" Type="Edm.Int32"/>
+        <Property Name="NetPriceAmount" Type="Edm.Decimal"/>
+        <Property Name="DocumentCurrency" Type="Edm.String"/>
+        <Property Name="Capacity" Type="Edm.Int32"/>
+        <Property Name="RiskScore" Type="Edm.Int32"/>
+      </EntityType>
+      <EntityType Name="PurchaseOrderConfirmation">
+        <Key><PropertyRef Name="PurchaseOrder"/></Key>
+        <Property Name="PurchaseOrder" Type="Edm.String" Nullable="false"/>
+        <Property Name="Supplier" Type="Edm.String"/>
+        <Property Name="ConfirmationStatus" Type="Edm.String"/>
+        <Property Name="ConfirmedQuantity" Type="Edm.Int32"/>
+      </EntityType>
+      <EntityType Name="AdvanceShipNotice">
+        <Key><PropertyRef Name="ASNId"/></Key>
+        <Property Name="ASNId" Type="Edm.String" Nullable="false"/>
+        <Property Name="PurchaseOrder" Type="Edm.String"/>
+        <Property Name="Status" Type="Edm.String"/>
+        <Property Name="EstimatedArrival" Type="Edm.DateTime"/>
+      </EntityType>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>"""
+
+
 async def post_webhook(
     url: str,
     payload: dict[str, Any],
@@ -177,6 +331,7 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
     inventory_seed = json.loads(inventory_raw)
     stock = MaterialStock(
         Material=inventory_seed["component_id"],
+        MatlWrhsStkQtyInMatBaseUnit=inventory_seed["current_stock"],
         MaterialName=inventory_seed["component_name"],
         UnrestrictedStock=inventory_seed["current_stock"],
         DailyConsumption=inventory_seed["daily_consumption"],
@@ -297,6 +452,72 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
             "expires_in": expires_in,
         }
 
+    @app.get("/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV/$metadata")
+    def material_stock_metadata() -> Response:
+        """Expose the small EDMX contract implemented by the material-stock simulator."""
+
+        return Response(
+            content=_material_stock_edmx(),
+            media_type="application/xml",
+        )
+
+    @app.get("/sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV/$metadata")
+    def purchase_order_metadata() -> Response:
+        """Expose the small EDMX contract implemented by the purchase-order simulator."""
+
+        return Response(
+            content=_purchase_order_edmx(),
+            media_type="application/xml",
+        )
+
+    @app.get("/sap/opu/odata/sap/API_BUSINESS_PARTNER/$metadata")
+    def business_partner_metadata() -> Response:
+        """Expose the supplier subset used by the sandbox business-partner route."""
+
+        return Response(
+            content=_business_partner_edmx(),
+            media_type="application/xml",
+        )
+
+    @app.get("/ariba/$metadata")
+    def ariba_metadata() -> Response:
+        """Expose the ChainMind-specific Ariba Integration Suite adapter contract."""
+
+        return Response(content=_ariba_edmx(), media_type="application/xml")
+
+    @app.get("/sap/opu/odata/sap/API_BUSINESS_PARTNER/A_Supplier", response_model=None)
+    def list_suppliers(
+        filter_expression: str | None = Query(default=None, alias="$filter"),
+        select_expression: str | None = Query(default=None, alias="$select"),
+        top: int | None = Query(default=None, ge=0, alias="$top"),
+    ) -> dict[str, Any] | JSONResponse:
+        """Return supplier identifiers and names with OData V2 metadata."""
+
+        entities = [
+            {
+                "Supplier": vendor.vendor_id,
+                "SupplierName": vendor.vendor_name,
+                "VendorName": vendor.vendor_name,
+            }
+            for vendor in vendors
+        ]
+        try:
+            selected = apply_odata_query(entities, filter_expression, select_expression, top)
+        except ValueError as exc:
+            return odata_error("400", str(exc), HTTP_400_BAD_REQUEST)
+        return {
+            "d": {
+                "results": [
+                    _odata_entity(
+                        entity,
+                        uri=f"A_Supplier('{entity.get('Supplier', '')}')",
+                        entity_type="API_BUSINESS_PARTNER.A_Supplier",
+                    )
+                    for entity in selected
+                ]
+            }
+        }
+
     @app.get(ODATA_STOCK_PATH, response_model=None)
     def get_material_stocks(
         filter_expression: str | None = Query(default=None, alias="$filter"),
@@ -310,7 +531,18 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
             result = apply_odata_query(entities, filter_expression, select_expression, top)
         except ValueError as exc:
             return odata_error("400", str(exc), HTTP_400_BAD_REQUEST)
-        return {"d": {"results": result}}
+        return {
+            "d": {
+                "results": [
+                    _odata_entity(
+                        entity,
+                        uri=f"A_MaterialStock('{entity.get('Material', '')}')",
+                        entity_type="API_MATERIAL_STOCK_SRV.A_MaterialStock",
+                    )
+                    for entity in result
+                ]
+            }
+        }
 
     @app.get(f"{ODATA_STOCK_PATH}/{{material_id}}", response_model=None)
     @app.get(f"{ODATA_STOCK_PATH}('{{material_id}}')", response_model=None)
@@ -319,7 +551,13 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
 
         if material_id != stock.Material:
             return odata_error("404", f"Material '{material_id}' was not found.", 404)
-        return {"d": stock.model_dump(mode="json")}
+        return {
+            "d": _odata_entity(
+                stock.model_dump(mode="json"),
+                uri=f"A_MaterialStock('{stock.Material}')",
+                entity_type="API_MATERIAL_STOCK_SRV.A_MaterialStock",
+            )
+        }
 
     @app.get(
         "/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV/A_BillOfMaterialItem",
@@ -344,12 +582,19 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
         try:
             return {
                 "d": {
-                    "results": apply_odata_query(
-                        entities,
-                        filter_expression,
-                        select_expression,
-                        top,
-                    )
+                    "results": [
+                        _odata_entity(
+                            entity,
+                            uri="A_BillOfMaterialItem('BOM-MICROCHIP-X')",
+                            entity_type="API_MATERIAL_STOCK_SRV.A_BillOfMaterialItem",
+                        )
+                        for entity in apply_odata_query(
+                            entities,
+                            filter_expression,
+                            select_expression,
+                            top,
+                        )
+                    ]
                 }
             }
         except ValueError as exc:
@@ -402,28 +647,81 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
         try:
             return {
                 "d": {
-                    "results": apply_odata_query(
-                        entities,
-                        filter_expression,
-                        select_expression,
-                        top,
-                    )
+                    "results": [
+                        _purchase_order_entity(entity)
+                        for entity in apply_odata_query(
+                            entities,
+                            filter_expression,
+                            select_expression,
+                            top,
+                        )
+                    ]
                 }
             }
         except ValueError as exc:
             return odata_error("400", str(exc), HTTP_400_BAD_REQUEST)
 
     @app.post(ODATA_PO_PATH, status_code=201, response_model=None)
-    def create_purchase_order(order: PurchaseOrder) -> dict[str, Any] | JSONResponse:
+    def create_purchase_order(order_payload: dict[str, Any]) -> dict[str, Any] | JSONResponse:
         """Store a draft PO in PENDING_APPROVAL state."""
 
+        try:
+            order = PurchaseOrder.model_validate(
+                {
+                    "po_id": (
+                        order_payload.get("po_id")
+                        or order_payload.get("ChainMindPurchaseOrderId")
+                        or str(uuid4())
+                    ),
+                    "sap_reference": order_payload.get(
+                        "sap_reference",
+                        order_payload.get("PurchaseOrder"),
+                    ),
+                    "vendor_id": order_payload.get("vendor_id", order_payload.get("Supplier")),
+                    "vendor_name": order_payload.get(
+                        "vendor_name",
+                        order_payload.get("ChainMindVendorName", ""),
+                    ),
+                    "component_id": order_payload.get(
+                        "component_id",
+                        order_payload.get("Material"),
+                    ),
+                    "component_name": order_payload.get(
+                        "component_name",
+                        order_payload.get("ChainMindMaterialName", ""),
+                    ),
+                    "quantity": order_payload.get("quantity", order_payload.get("OrderQuantity")),
+                    "unit_price": order_payload.get(
+                        "unit_price",
+                        order_payload.get("NetPriceAmount"),
+                    ),
+                    "total_price": order_payload.get(
+                        "total_price",
+                        order_payload.get("ChainMindTotalPrice"),
+                    ),
+                    "currency": order_payload.get(
+                        "currency",
+                        order_payload.get("DocumentCurrency", "USD"),
+                    ),
+                    "terms": order_payload.get(
+                        "terms",
+                        order_payload.get("ChainMindTerms", "Air Freight"),
+                    ),
+                    "status": order_payload.get(
+                        "status",
+                        order_payload.get("ChainMindStatus", "PENDING_APPROVAL"),
+                    ),
+                }
+            )
+        except ValidationError as exc:
+            return odata_error("400", str(exc), HTTP_400_BAD_REQUEST)
         order_key = str(order.po_id)
         if order_key in state.orders:
             return odata_error("409", "Purchase order already exists.", HTTP_409_CONFLICT)
         draft = order.model_copy(deep=True)
         draft.status = "PENDING_APPROVAL"
         state.orders[order_key] = draft
-        return {"d": draft.model_dump(mode="json")}
+        return {"d": _purchase_order_entity(draft)}
 
     @app.get(f"{ODATA_PO_PATH}/{{po_id}}", response_model=None)
     @app.get(f"{ODATA_PO_PATH}('{{po_id}}')", response_model=None)
@@ -433,7 +731,7 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
         order = state.orders.get(po_id)
         if order is None:
             return odata_error("404", "Purchase order was not found.", 404)
-        return {"d": order.model_dump(mode="json")}
+        return {"d": _purchase_order_entity(order)}
 
     @app.patch(f"{ODATA_PO_PATH}/{{po_id}}", response_model=None)
     @app.patch(f"{ODATA_PO_PATH}('{{po_id}}')", response_model=None)
@@ -449,7 +747,7 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
         order.status = update.status
         if update.status == "EXECUTED":
             order.sap_reference = f"MOCK-PO-{order.po_id.hex[:8].upper()}"
-        return {"d": order.model_dump(mode="json")}
+        return {"d": _purchase_order_entity(order)}
 
     @app.post("/sap/opu/odata/sap/Z_CHAINMIND_TRACKING_SRV/InventoryProjection")
     def save_inventory_projection(projection: InventoryProjection) -> dict[str, Any]:
@@ -493,16 +791,24 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
     ) -> dict[str, Any] | JSONResponse:
         """List alternative vendors from the shared ChainMind seed data."""
 
-        entities = [vendor.model_dump(mode="json") for vendor in vendors]
+        entities = [_ariba_vendor_entity(vendor) for vendor in vendors]
         try:
+            selected = apply_odata_query(
+                entities,
+                filter_expression,
+                select_expression,
+                top,
+            )
             return {
                 "d": {
-                    "results": apply_odata_query(
-                        entities,
-                        filter_expression,
-                        select_expression,
-                        top,
-                    )
+                    "results": [
+                        _odata_entity(
+                            entity,
+                            uri=f"SupplierOffer('{entity['Supplier']}')",
+                            entity_type="CHAINMIND_ARIBA_ADAPTER.SupplierOffer",
+                        )
+                        for entity in selected
+                    ]
                 }
             }
         except ValueError as exc:
@@ -518,10 +824,14 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
         return {
             "d": {
                 "results": [
-                    {
-                        **vendor.model_dump(mode="json"),
-                        "rating": max(1, round(5 - vendor.risk_score / 25, 1)),
-                    }
+                    _odata_entity(
+                        {
+                            **_ariba_vendor_entity(vendor),
+                            "rating": max(1, round(5 - vendor.risk_score / 25, 1)),
+                        },
+                        uri=f"SupplierOffer('{vendor.vendor_id}')",
+                        entity_type="CHAINMIND_ARIBA_ADAPTER.SupplierOffer",
+                    )
                 ]
             }
         }
@@ -532,7 +842,15 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
 
         key = str(order.po_id)
         state.ariba_orders.setdefault(key, order.model_copy(deep=True))
-        return {"ariba_reference": f"MOCK-ARIBA-{order.po_id.hex[:8].upper()}"}
+        return {
+            "d": {
+                "ariba_reference": f"MOCK-ARIBA-{order.po_id.hex[:8].upper()}",
+                "__metadata": {
+                    "uri": f"PurchaseOrder('{key}')",
+                    "type": "CHAINMIND_ARIBA_ADAPTER.PurchaseOrderAcknowledgement",
+                },
+            }
+        }
 
     @app.get("/ariba/po/{po_id}/confirmation", response_model=None)
     def get_vendor_confirmation(po_id: str) -> dict[str, Any] | JSONResponse:
@@ -542,10 +860,17 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
         if order is None:
             return odata_error("404", "Ariba purchase order was not found.", 404)
         return {
-            "purchase_order_id": po_id,
-            "confirmation_status": "CONFIRMED",
-            "confirmed_quantity": order.quantity,
-            "note": "Simulated supplier confirmation.",
+            "d": {
+                "PurchaseOrder": po_id,
+                "Supplier": order.vendor_id,
+                "confirmation_status": "CONFIRMED",
+                "confirmed_quantity": order.quantity,
+                "note": "Simulated supplier confirmation.",
+                "__metadata": {
+                    "uri": f"PurchaseOrderConfirmation('{po_id}')",
+                    "type": "CHAINMIND_ARIBA_ADAPTER.PurchaseOrderConfirmation",
+                },
+            },
         }
 
     @app.get("/ariba/po/{po_id}/asn", response_model=None)
@@ -560,11 +885,19 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
             return odata_error("404", "The PO's supplier was not found.", 404)
 
         return {
-            "purchase_order_id": po_id,
-            "asn_id": f"ASN-{po_id[:8].upper()}",
-            "status": "IN_TRANSIT",
-            "estimated_arrival": (date.today() + timedelta(days=vendor.lead_time_days)).isoformat(),
-            "note": "Simulated advance ship notice.",
+            "d": {
+                "PurchaseOrder": po_id,
+                "asn_id": f"ASN-{po_id[:8].upper()}",
+                "status": "IN_TRANSIT",
+                "estimated_arrival": (
+                    date.today() + timedelta(days=vendor.lead_time_days)
+                ).isoformat(),
+                "note": "Simulated advance ship notice.",
+                "__metadata": {
+                    "uri": f"AdvanceShipNotice('{po_id}')",
+                    "type": "CHAINMIND_ARIBA_ADAPTER.AdvanceShipNotice",
+                },
+            },
         }
 
     @app.post("/event-mesh/publish", status_code=202, response_model=None)
