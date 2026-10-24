@@ -70,7 +70,14 @@ from chainmind.workflow.definition import WorkflowState, validate_transition
 class ChainMindStack(Stack):
     """Define the API, event bus, four-agent state machine, and audit storage."""
 
-    def __init__(self, scope: Construct, construct_id: str, **kwargs: object) -> None:
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        *,
+        lambda_asset: Path | None = None,
+        **kwargs: object,
+    ) -> None:
         super().__init__(scope, construct_id, **kwargs)
         chainmind_mode = str(self.node.try_get_context("chainmindMode") or "mock")
         if chainmind_mode not in {"mock", "aws"}:
@@ -138,7 +145,7 @@ class ChainMindStack(Stack):
                 private_dns_enabled=True,
             )
         source = lambda_.Code.from_asset(
-            str(project_root / "src"),
+            str(lambda_asset or project_root / "src"),
             exclude=["**/__pycache__/**", "**/*.pyc"],
         )
 
@@ -163,6 +170,7 @@ class ChainMindStack(Stack):
             encryption=sqs.QueueEncryption.KMS,
             encryption_master_key=encryption_key,
             retention_period=Duration.days(14),
+            enforce_ssl=True,
         )
 
         # Private S3 storage for decision rationale and audit artifacts.
@@ -1068,3 +1076,180 @@ class ChainMindStack(Stack):
         CfnOutput(self, "AuditArtifactsBucket", value=artifacts.bucket_name)
         CfnOutput(self, "CognitoUserPoolId", value=user_pool.user_pool_id)
         CfnOutput(self, "CognitoDashboardClientId", value=dashboard_client.user_pool_client_id)
+
+    def add_nag_suppressions(self) -> None:
+        """Document intentional scaffold tradeoffs flagged by AwsSolutions."""
+
+        from cdk_nag import NagSuppressions
+
+        for path, reason in (
+            (
+                "ChainMindRestApi/Default/health/GET/Resource",
+                "The health probe exposes only service liveness and no application or user data.",
+            ),
+            (
+                "ChainMindRestApi/Default/event-bridge/POST/Resource",
+                "Event Mesh uses a signed HMAC payload; this integration endpoint does not "
+                "accept user decisions and has a separately configured shared secret.",
+            ),
+        ):
+            NagSuppressions.add_resource_suppressions_by_path(
+                self,
+                f"{self.node.path}/{path}",
+                [{"id": "AwsSolutions-COG4", "reason": reason}],
+            )
+
+        for path in (
+            "ChainMindVpc/BedrockRuntimeEndpoint/SecurityGroup/Resource",
+            "ChainMindVpc/SecretsManagerEndpoint/SecurityGroup/Resource",
+            "ChainMindVpc/CloudWatchLogsEndpoint/SecurityGroup/Resource",
+        ):
+            NagSuppressions.add_resource_suppressions_by_path(
+                self,
+                f"{self.node.path}/{path}",
+                [
+                    {
+                        "id": "CdkNagValidationFailure",
+                        "reason": (
+                            "The CDK-generated endpoint security group ingress references "
+                            "VPC subnet CIDRs through CloudFormation intrinsics, which this "
+                            "rule cannot statically resolve; the generated rules are scoped "
+                            "to the VPC endpoint traffic path."
+                        ),
+                    }
+                ],
+            )
+
+        NagSuppressions.add_stack_suppressions(
+            self,
+            [
+                {
+                    "id": "AwsSolutions-IAM4",
+                    "reason": (
+                        "Lambda basic execution and VPC access managed policies are required "
+                        "for CloudWatch logging and ENI management; application permissions "
+                        "remain scoped to individual resources."
+                    ),
+                },
+                {
+                    "id": "AwsSolutions-IAM5",
+                    "reason": (
+                        "Scoped object-prefix and service-managed resource ARNs require "
+                        "wildcard suffixes; each statement is constrained to its owning "
+                        "bucket, table, key, or workflow resource."
+                    ),
+                },
+                {
+                    "id": "AwsSolutions-L1",
+                    "reason": (
+                        "Python 3.12 is the project-required Lambda runtime; deployment "
+                        "must be reviewed when AWS deprecates this supported runtime."
+                    ),
+                },
+                {
+                    "id": "AwsSolutions-S1",
+                    "reason": (
+                        "The private audit bucket has KMS encryption, versioning and blocked "
+                        "public access; a same-account logging bucket needs a separately "
+                        "reviewed retention policy before deployment."
+                    ),
+                },
+                {
+                    "id": "AwsSolutions-APIG2",
+                    "reason": (
+                        "FastAPI/Pydantic validates request models inside the Lambda "
+                        "integration; API Gateway models would duplicate that contract."
+                    ),
+                },
+                {
+                    "id": "AwsSolutions-APIG3",
+                    "reason": (
+                        "The prototype applies Cognito authorization and stage throttling; "
+                        "a deployment-specific AWS WAF ACL remains a production prerequisite."
+                    ),
+                },
+                {
+                    "id": "AwsSolutions-APIG4",
+                    "reason": (
+                        "Only health and signed notification inspection callbacks are public "
+                        "by design; decision methods require the Cognito authorizer."
+                    ),
+                },
+                {
+                    "id": "AwsSolutions-COG2",
+                    "reason": (
+                        "MFA and recovery policies depend on the production identity "
+                        "provider's approved user lifecycle and must be configured per tenant."
+                    ),
+                },
+                {
+                    "id": "AwsSolutions-COG3",
+                    "reason": (
+                        "Cognito advanced security has account-level cost and requires a "
+                        "production threat model; enable it as part of the account review."
+                    ),
+                },
+                {
+                    "id": "AwsSolutions-VPC7",
+                    "reason": (
+                        "VPC Flow Logs require a deployment-specific destination, retention "
+                        "and cost policy; network logging is a documented production gate."
+                    ),
+                },
+                {
+                    "id": "AwsSolutions-SF1",
+                    "reason": (
+                        "Execution logging is intentionally omitted to avoid capturing "
+                        "approval tokens and sensitive workflow payloads; sanitized audit "
+                        "records are persisted separately."
+                    ),
+                },
+                {
+                    "id": "AwsSolutions-SF2",
+                    "reason": (
+                        "X-Ray tracing is enabled; this additional logging rule is "
+                        "intentionally avoided to prevent raw input payload capture."
+                    ),
+                },
+                {
+                    "id": "AwsSolutions-EVT2",
+                    "reason": (
+                        "Rules target same-stack Lambda handlers; the Step Functions path "
+                        "has an explicit encrypted DLQ and scheduled rule retries are "
+                        "bounded by the Lambda target service."
+                    ),
+                },
+                {
+                    "id": "AwsSolutions-CT1",
+                    "reason": (
+                        "The CloudTrail destination is encrypted and retained; organization "
+                        "trail and bucket policy requirements must be verified in the target "
+                        "AWS account before deployment."
+                    ),
+                },
+                {
+                    "id": "AwsSolutions-SQS3",
+                    "reason": (
+                        "This queue is the terminal workflow DLQ, so it cannot itself use "
+                        "another dead-letter queue. A CloudWatch alarm tracks visible "
+                        "messages for operator recovery."
+                    ),
+                },
+                {
+                    "id": "AwsSolutions-SMG4",
+                    "reason": (
+                        "Automatic rotation needs coordinated consumers and overlap for "
+                        "HMAC verification. Until dual-key rotation is implemented, both "
+                        "secrets require documented operator rotation before expiry."
+                    ),
+                },
+                {
+                    "id": "AwsSolutions-COG8",
+                    "reason": (
+                        "The demo Cognito pool intentionally uses the basic tier to avoid "
+                        "advanced-tier charges; select a production feature plan after "
+                        "identity and budget review."
+                    ),
+                },
+            ],
+        )
