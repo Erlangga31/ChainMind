@@ -39,7 +39,7 @@ export function WorkflowTimeline({ run }: { run: DisruptionRun }) {
               <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 0{index + 1}
               </span>
-              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${isActive ? "animate-pulse bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-700"}`}>
+              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${isActive ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-700"}`}>
                 {status.replaceAll("_", " ")}
               </span>
             </div>

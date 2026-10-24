@@ -244,14 +244,14 @@ export default function App() {
 
   const refreshRuns = useCallback(async (preferredId?: string) => {
     const items = await request<DisruptionRun[]>("/runs");
-    setRuns(items);
+    setRuns((current) => JSON.stringify(current) === JSON.stringify(items) ? current : items);
     const nextId = preferredId || selectedId || items[0]?.run_id || "";
     setSelectedId(nextId);
     if (nextId) {
       const detail = await request<DisruptionRun>(`/runs/${nextId}`);
-      setRun(detail);
+      setRun((current) => JSON.stringify(current) === JSON.stringify(detail) ? current : detail);
     } else {
-      setRun(null);
+      setRun((current) => current === null ? current : null);
     }
   }, [selectedId]);
 
@@ -272,14 +272,14 @@ export default function App() {
   }, [session]);
 
   useEffect(() => {
-    if (!session) return;
+    if (!session || busy) return;
     const timer = window.setInterval(() => {
       void refreshRuns().catch((caught: unknown) => {
         setError(caught instanceof Error ? caught.message : "Could not refresh live run status.");
       });
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [refreshRuns, session]);
+  }, [busy, refreshRuns, session]);
 
   useEffect(() => {
     const token = new URLSearchParams(window.location.search).get("approve");
@@ -461,7 +461,7 @@ export default function App() {
               </select>
             </label>
             <button
-              className="rounded-xl bg-accent px-5 py-3 font-semibold text-white shadow-sm transition hover:bg-teal-800 disabled:cursor-wait disabled:opacity-60"
+              className="rounded-xl bg-accent px-5 py-3 font-semibold text-white shadow-sm transition-colors hover:bg-teal-800 disabled:cursor-wait disabled:opacity-60"
               disabled={busy}
               onClick={() => void triggerDemo()}
             >

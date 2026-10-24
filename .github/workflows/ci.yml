@@ -75,6 +75,44 @@ jobs:
         run: npm audit --audit-level=moderate
         working-directory: dashboard
 
+  dashboard-e2e:
+    name: Dashboard end-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+      - name: Install project and development dependencies
+        run: uv sync --extra dev
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - name: Install dashboard dependencies
+        run: npm ci
+        working-directory: dashboard
+      - name: Type-check browser tests
+        run: npm run typecheck:e2e
+        working-directory: dashboard
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: dashboard
+      - name: Run browser scenarios
+        run: npm run test:e2e
+        working-directory: dashboard
+
   compose:
     name: Local demo stack
     runs-on: ubuntu-latest

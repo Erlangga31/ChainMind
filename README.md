@@ -128,7 +128,16 @@ npm run dev
 
 Buka `http://localhost:5173`, klik **Sign in with ChainMind SSO**, lalu masuk sebagai `viewer` atau `approver` (password `demo`). Pilih skenario, lalu klik **Trigger demo disruption**. Dashboard menampilkan linimasa enam tahap, dampak stok, tabel serta grafik vendor, trace per sumber, audit log, draf PO dengan dialog konfirmasi, tracking dan halaman KPI ilustratif. Viewer tetap read-only; hanya bearer token terverifikasi dengan role approver yang dapat mengirim keputusan.
 
-Jalankan tes dan build dashboard dengan `npm test` dan `npm run build` dari folder `dashboard`.
+![Dashboard ChainMind dengan draf PO Vendor B yang menunggu persetujuan](./docs/screenshots/chainmind-pending-approval.png)
+
+Jalankan unit test, browser-test typecheck, E2E, dan build dari folder `dashboard`:
+
+```powershell
+npm test
+npm run typecheck:e2e
+npm run test:e2e
+npm run build
+```
 
 ### Semua layanan lokal dengan Docker Compose
 
