@@ -3,8 +3,32 @@
 import json
 from importlib.resources import files
 
-from chainmind.core.models import DisruptionEvent
+from chainmind.core.models import DisruptionEvent, StageResult
 from chainmind.factory import create_pipeline
+
+DEMO_STAGE_GROUPS = (
+    ("Deteksi Gangguan", ("monitoring",)),
+    ("Analisis Dampak", ("logistics",)),
+    ("Pencarian Solusi", ("procurement",)),
+    ("Analisis & Keputusan", ("orchestrator",)),
+    ("Human-in-the-Loop", ("human approval",)),
+    ("Eksekusi Purchase Order", ("po execution", "execution & tracking")),
+)
+
+
+def format_demo_stages(stages: list[StageResult]) -> list[str]:
+    """Group internal workflow stages under the six proposal demo labels."""
+
+    lines = []
+    for label, names in DEMO_STAGE_GROUPS:
+        matched = [stage for stage in stages if any(name in stage.name.lower() for name in names)]
+        if matched:
+            status = ", ".join(stage.status for stage in matched)
+            summary = " ".join(stage.summary for stage in matched)
+            lines.append(f"[{label}] {status}: {summary}")
+        else:
+            lines.append(f"[{label}] WAITING: Menunggu tahap sebelumnya.")
+    return lines
 
 
 def main() -> None:
@@ -15,8 +39,8 @@ def main() -> None:
     run = create_pipeline().run(event)
     print(f"ChainMind demo - run {run.run_id}")
     print(f"Severity: {run.severity}; status: {run.status.value}")
-    for stage in run.stages:
-        print(f"\n[{stage.name}] {stage.status}: {stage.summary}")
+    for stage_line in format_demo_stages(run.stages):
+        print(f"\n{stage_line}")
     print("\nVendor comparison:")
     for evaluation in run.vendor_comparison:
         print(

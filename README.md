@@ -130,6 +130,16 @@ Buka `http://localhost:5173`, klik **Sign in with ChainMind SSO**, lalu masuk se
 
 ![Dashboard ChainMind dengan draf PO Vendor B yang menunggu persetujuan](./docs/screenshots/chainmind-pending-approval.png)
 
+Cuplikan alur demo lain:
+
+![Login fake OIDC](./docs/screenshots/login.png)
+![Timeline enam tahap](./docs/screenshots/timeline.png)
+![Grafik perbandingan vendor](./docs/screenshots/vendor-charts.png)
+![Chain of Thought summary](./docs/screenshots/chain-of-thought.png)
+![Feed notifikasi](./docs/screenshots/notification-feed.png)
+![Draf PO menunggu approval](./docs/screenshots/po-approval.png)
+![KPI ilustratif](./docs/screenshots/kpis.png)
+
 Jalankan unit test, browser-test typecheck, E2E, dan build dari folder `dashboard`:
 
 ```powershell
@@ -151,6 +161,18 @@ atau gunakan `make run-all`. API, SAP sandbox, dan dashboard tersedia masing-mas
 `http://localhost:8000`, `http://localhost:8100`, dan `http://localhost:5173`.
 Konfigurasi Compose memakai shared/signing secret demo lokal saja; jangan gunakan nilainya
 di deployment. Hentikan layanan dengan `docker compose down` atau `make down`.
+
+### Semua layanan lokal di Windows tanpa Make atau Docker
+
+Setelah dependency terpasang (`uv sync --extra dev` dan `cd dashboard; npm ci`), dari root jalankan:
+
+```powershell
+.\scripts\run_all.ps1
+```
+
+Launcher menyalakan fake OIDC/SAP sandbox, API, dan Vite; menunggu health checks; lalu menampilkan
+URL serta akun demo. Tekan `Ctrl+C` pada terminal yang sama untuk menghentikan proses. Alternatifnya:
+`uv run python scripts/run_all.py`.
 
 ### Tes, lint, dan sintesis infrastruktur
 
