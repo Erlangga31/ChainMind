@@ -34,6 +34,11 @@ Bedrock, Cognito/IAS, Teams/Slack/SES, SAP, atau SAP BTP telah diverifikasi seca
 | 11 — model bisnis dan target pasar | Partial | Target buyer/operator, tier usage demo, onboarding, dan distribusi potensial dalam [BUSINESS.md](./BUSINESS.md) dan [MARKETPLACE.md](./MARKETPLACE.md). | unit-tested metering; pricing defaults illustrative; marketplace listing and willingness-to-pay TBD. |
 | 12 — dampak/KPI | Implemented (local comparison) | `GET /kpis`, timestamp response measurement, repeated-scenario decision-consistency metric, and dashboard comparison. | unit-tested; manual baselines/workload targets illustrative; no production/SAP measurement. |
 | Tenant metering and isolation | Implemented (local scaffold) | Tenant JWT claim, tenant-scoped run/idempotency/KPI/current-month usage routes, per-tenant plan/agent overrides, role-gated usage page. | unit-tested; tenant provisioning, billing integration, and production isolation review **need real AWS or SAP**. |
+| Vendor alternatif lokal | Implemented (seeded simulation) | [Procurement ranking](../src/chainmind/agents/procurement.py), [regional vendor seeds](../src/chainmind/data/seed_vendors.json), plant region on inventory. | unit-tested; regional distance and capacity remain simulated data. |
+| Multi-material BOM impact | Implemented (seeded simulation) | [Multi-component logistics](../src/chainmind/agents/logistics.py), [additional inventory fixture](../src/chainmind/data/seed_additional_inventory.json), impact table in dashboard. | unit-tested with two affected materials; no live SAP BOM source. |
+| Indonesian/English experience and accessible layout | Implemented | [translations](../dashboard/src/i18n.ts), localized notifications/demo labels, accessibility controls and [Playwright axe/responsive test](../dashboard/e2e/auth-workflow.spec.ts). | unit-tested, Playwright; critical/serious axe violations blocked, 375px and 1280px viewports exercised. |
+| Model-agnostic Bedrock configuration | Implemented (configuration surface) | `CHAINMIND_BEDROCK_MODEL_ID`, `BedrockLLMClient`, and deterministic Bedrock Agents fallback metadata. | unit-tested configuration; model permissions/invocation **needs real AWS**. |
+| Release and budget readiness | Implemented (scaffold) | [Version/changelog](../CHANGELOG.md), [tag guidance](../CONTRIBUTING.md), [jury evidence](./JURY_PACK.md), CDK budget threshold and project tags. | CDK assertions, synth-only; cost-allocation tag activation, SNS email confirmation, and real account spend monitoring **needs real AWS**. |
 | 13 — roadmap MVP enam minggu | Partial | Sandbox, API, agents, UI, notifikasi, demo dan testing dijabarkan di [DEMO.md](./DEMO.md). | Implementasi mock lokal terverifikasi; pilot BTP dan runtime layanan nyata belum dikerjakan. |
 | 15 — risiko dan mitigasi | Partial | Risiko salah pilih agen, adopsi, kompleksitas SAP, ketergantungan Bedrock, dan perubahan API dicatat di [BUSINESS.md](./BUSINESS.md). | Documentation-only, cdk-nag synth-only; bukan threat model atau security certification formal. |
 | 16 — pendanaan/sumber daya | Partial | Kategori biaya AWS/SAP, kapasitas tim, dan user validation placeholders tersedia di [BUSINESS.md](./BUSINESS.md). | Tidak ada harga, budget, atau estimasi aktual; semua masih TBD. |
@@ -90,14 +95,16 @@ Bedrock, Cognito/IAS, Teams/Slack/SES, SAP, atau SAP BTP telah diverifikasi seca
 
 ## Validasi dan batas deployment
 
-CI commit `a099784` hijau, termasuk LocalStack integration job. Itu memverifikasi layanan simulator,
-bukan invocation Lambda melalui event-source mapping, dan bukan AWS nyata. Validasi lokal Phase 20:
-backend **131 passed, 9 skipped**, dashboard **10 passed**, Playwright **6 passed**, production/E2E
-TypeScript build lulus, Ruff lulus, 8 CDK assertion tests lulus, dan `cdk synth` lulus. Docker Compose
-config tidak dapat divalidasi lokal karena Docker CLI/Engine tidak tersedia di Windows. Audit
-dependency dan secret scan final belum dijalankan untuk perubahan Phase 20.
+Validasi lokal terbaru: backend pytest **141 passed, 9 skipped** (LocalStack/live SAP opt-in tidak
+dijalankan lokal); dashboard Vitest **12 passed**; Playwright **7 passed**, termasuk axe check dan
+viewport 375px / 1280px; browser-test typecheck dan production build lulus; Ruff lint/format lulus;
+CDK assertions **13 passed**; `cdk synth` lulus. `npm audit --audit-level=moderate` tidak menemukan
+kerentanan. `pip-audit` tidak menemukan advisories pada dependency yang dikenal; package lokal
+`chainmind` ditandai skip karena belum dipublikasikan ke PyPI. Secret scan repository tidak
+menemukan pola kredensial; PDF proposal tetap di-ignore dan tidak tracked. Docker CLI/Engine tidak
+tersedia, jadi `docker compose config` tidak dijalankan. CI commit release harus diperiksa di GitHub.
 
-CDK synth menargetkan Python 3.12 Linux x86_64 dan memaketkan dependencies. Synthesis tidak membuktikan
-asset dijalankan Lambda. Suppressions cdk-nag yang ada memiliki alasan tertulis; review akun target,
-WAF, VPC flow logs, secret rotation, Bedrock permissions, retention, biaya, dan network paths tetap
-menjadi deployment gate. Tidak ada AWS/SAP live deployment atau certification.
+CDK synth menargetkan Python 3.12 Linux x86_64 dan memaketkan dependencies. Synthesis tidak
+membuktikan asset dijalankan Lambda. Suppressions cdk-nag yang ada memiliki alasan tertulis; review
+akun target, WAF, VPC flow logs, secret rotation, Bedrock permissions, retention, biaya, dan network
+paths tetap menjadi deployment gate. Tidak ada AWS/SAP live deployment atau certification.

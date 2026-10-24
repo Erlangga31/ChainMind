@@ -1,5 +1,6 @@
 """AWS infrastructure for ChainMind's disruption-response workflow."""
 
+import math
 from pathlib import Path
 
 from aws_cdk import (
@@ -7,12 +8,16 @@ from aws_cdk import (
     Duration,
     RemovalPolicy,
     Stack,
+    Tags,
 )
 from aws_cdk import (
     aws_apigateway as apigateway,
 )
 from aws_cdk import (
     aws_bedrock as bedrock,
+)
+from aws_cdk import (
+    aws_budgets as budgets,
 )
 from aws_cdk import (
     aws_cloudtrail as cloudtrail,
@@ -52,6 +57,9 @@ from aws_cdk import (
 )
 from aws_cdk import (
     aws_secretsmanager as secretsmanager,
+)
+from aws_cdk import (
+    aws_sns as sns,
 )
 from aws_cdk import (
     aws_sqs as sqs,
@@ -95,6 +103,15 @@ class ChainMindStack(Stack):
         )
         if llm_backend not in {"mock", "bedrock", "bedrock_agents"}:
             raise ValueError("Set CDK context llmBackend to mock, bedrock, or bedrock_agents.")
+        configured_monthly_budget = self.node.try_get_context("monthlyBudgetUsd")
+        monthly_budget_usd = float(
+            100 if configured_monthly_budget is None else configured_monthly_budget
+        )
+        if not math.isfinite(monthly_budget_usd) or monthly_budget_usd <= 0:
+            raise ValueError("Set monthlyBudgetUsd CDK context to a finite, positive amount.")
+        Tags.of(self).add("Project", "ChainMind")
+        Tags.of(self).add("Environment", chainmind_mode)
+        Tags.of(self).add("ManagedBy", "AWS-CDK")
         model_arn = (
             f"arn:{self.partition}:bedrock:{self.region}::foundation-model/{bedrock_model_id}"
         )
@@ -1068,6 +1085,58 @@ class ChainMindStack(Stack):
                 ]
             ],
         )
+        budget_alerts = sns.Topic(
+            self,
+            "ChainMindBudgetAlerts",
+            topic_name="chainmind-budget-alerts",
+            master_key=encryption_key,
+            enforce_ssl=True,
+        )
+        budget_alerts.add_to_resource_policy(
+            iam.PolicyStatement(
+                principals=[iam.ServicePrincipal("budgets.amazonaws.com")],
+                actions=["sns:Publish"],
+                resources=[budget_alerts.topic_arn],
+            )
+        )
+        budget_notification_email = self.node.try_get_context("budgetNotificationEmail")
+        if budget_notification_email:
+            sns.Subscription(
+                self,
+                "ChainMindBudgetEmailSubscription",
+                topic=budget_alerts,
+                protocol=sns.SubscriptionProtocol.EMAIL,
+                endpoint=str(budget_notification_email),
+            )
+        budgets.CfnBudget(
+            self,
+            "ChainMindMonthlyBudget",
+            budget=budgets.CfnBudget.BudgetDataProperty(
+                budget_type="COST",
+                time_unit="MONTHLY",
+                budget_limit=budgets.CfnBudget.SpendProperty(
+                    amount=monthly_budget_usd,
+                    unit="USD",
+                ),
+                cost_filters={"TagKeyValue": ["user:Project$ChainMind"]},
+            ),
+            notifications_with_subscribers=[
+                budgets.CfnBudget.NotificationWithSubscribersProperty(
+                    notification=budgets.CfnBudget.NotificationProperty(
+                        comparison_operator="GREATER_THAN",
+                        notification_type="ACTUAL",
+                        threshold=80,
+                        threshold_type="PERCENTAGE",
+                    ),
+                    subscribers=[
+                        budgets.CfnBudget.SubscriberProperty(
+                            address=budget_alerts.topic_arn,
+                            subscription_type="SNS",
+                        )
+                    ],
+                )
+            ],
+        )
 
         CfnOutput(self, "ApiUrl", value=api.url)
         CfnOutput(self, "EventBusName", value=event_bus.event_bus_name)
@@ -1076,6 +1145,7 @@ class ChainMindStack(Stack):
         CfnOutput(self, "AuditArtifactsBucket", value=artifacts.bucket_name)
         CfnOutput(self, "CognitoUserPoolId", value=user_pool.user_pool_id)
         CfnOutput(self, "CognitoDashboardClientId", value=dashboard_client.user_pool_client_id)
+        CfnOutput(self, "BudgetAlertsTopicArn", value=budget_alerts.topic_arn)
 
     def add_nag_suppressions(self) -> None:
         """Document intentional scaffold tradeoffs flagged by AwsSolutions."""

@@ -48,11 +48,11 @@ class NotificationService:
                 else f"Approval requested: {run.event.component_name}"
             )
             decision_summary = (
-                f"Vendor {run.draft_po.vendor_name} direkomendasikan; biaya tanpa tindakan "
+                f"{run.draft_po.vendor_name} direkomendasikan; biaya tanpa tindakan "
                 f"${run.cost_of_inaction:,.0f}. Draf PO menunggu persetujuan manusia."
                 if is_indonesian
                 else (
-                    f"Vendor {run.draft_po.vendor_name} is recommended; cost of inaction is "
+                    f"{run.draft_po.vendor_name} is recommended; cost of inaction is "
                     f"${run.cost_of_inaction:,.0f}. The draft PO awaits human approval."
                 )
             )

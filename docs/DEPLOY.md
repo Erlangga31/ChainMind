@@ -10,6 +10,7 @@
   dependency tersebut dan menyimpan cache lokal di `infra/.lambda-package/`.
 - Akun dan region AWS dengan izin membuat VPC/NAT Gateway, API Gateway, Cognito, Lambda, DynamoDB, S3, KMS, CloudTrail, Bedrock, Step Functions, EventBridge, CloudWatch, dan Secrets Manager.
 - Aktifkan akses ke foundation model Bedrock pada region yang sama, setujui permintaan akses model bila diperlukan, lalu atur context `bedrockModelId`. Pastikan role Lambda hanya memperoleh aksi Bedrock yang diperlukan.
+- Pilihan model Converse dapat diganti lewat `CHAINMIND_BEDROCK_MODEL_ID` tanpa mengubah kode; pastikan model pengganti tersedia dan izinkan aksesnya di region akun. Mode `mock` tetap offline. Adapter Bedrock Agents menggunakan fallback penjelasan deterministik yang tercatat (`fallback_used`/`fallback_reason`) saat respons ditolak, gagal diparse, atau confidence terlalu rendah. Adapter Converse biasa menampilkan error secara eksplisit dan tidak menyamarkannya sebagai keberhasilan. Semua perhitungan biaya tetap di Python.
 - SAP BTP tenant dengan SAP Integration Suite, API Management/destination dan OAuth client; SAP Event Mesh service instance/queue/webhook; SAP Cloud Connector atau private connectivity yang disetujui organisasi; SAP IAS/Cognito issuer dan callback HTTPS. Detail endpoint serta scope harus dikonfirmasi oleh pemilik SAP.
 - Akun AWS yang dapat membuat KMS keys, VPC endpoints, NAT Gateway, CloudTrail multi-region, Cognito hosted UI, CloudWatch logs, Bedrock Agents/Guardrail, dan service-linked roles. Estimasikan biaya sebelum membuat resource.
 
@@ -24,6 +25,36 @@
 7. Konfigurasikan SAP Integration Suite, Event Mesh, Cloud Connector/private connectivity, destination, OAuth scopes, IAS/Cognito, serta Teams/Slack webhook atau SES verified sender.
 8. Tinjau IAM least privilege, KMS key policies, CloudTrail, VPC flow logging, WAF, alarms, API throttling, retention, secret rotation, dan disaster recovery. Lambda asset saat ini menargetkan Linux x86_64/Python 3.12; uji pada akun staging sebelum produksi.
 9. Tinjau template terakhir: `npx --yes aws-cdk synth`. Hanya setelah persetujuan biaya dan keamanan, deploy dengan `npx --yes aws-cdk deploy`.
+
+### Budget dan cost allocation
+
+CDK membuat budget biaya bulanan default **USD 100** untuk tag `Project=ChainMind`, dengan
+notifikasi aktual pada ambang **80%** ke SNS topic terenkripsi KMS. Ubah batas melalui context
+`monthlyBudgetUsd`; untuk menerima email, berikan context `budgetNotificationEmail` saat synth/deploy
+dan konfirmasikan subscription email yang dikirim AWS. Budget/tag tidak menetapkan batas keras dan
+tidak mencegah biaya melebihi nilai tersebut. Aktifkan user-defined cost allocation tag `Project`
+di Billing and Cost Management sebelum mengandalkan laporan atau filter budget. Seluruh resource
+yang dapat ditag membawa `Project`, `Environment`, dan `ManagedBy`; verifikasi dukungan tag untuk
+setiap layanan di akun target.
+
+Contoh sintesis dengan budget USD 250 dan penerima email (alamat harus dikonfirmasi oleh pemiliknya):
+
+```powershell
+npx --yes aws-cdk synth -c monthlyBudgetUsd=250 -c budgetNotificationEmail=ops@example.com
+```
+
+Kerangka estimasi biaya (isi dengan harga region dan konfigurasi akun sebelum persetujuan):
+
+| Komponen | Perkiraan bulanan |
+| --- | --- |
+| VPC, dua AZ, NAT Gateway dan VPC endpoints | USD `<isi harga region>` |
+| Lambda, API Gateway, EventBridge dan Step Functions | USD `<isi volume request>` |
+| Bedrock model/Agents dan Guardrail | USD `<isi model, token dan request>` |
+| CloudTrail, CloudWatch, S3, DynamoDB, SQS, KMS dan Secrets Manager | USD `<isi retensi/volume>` |
+| Total dan buffer operasional | USD `<hitung setelah estimasi layanan>` |
+
+Angka pada `monthlyBudgetUsd` adalah alarm operasional saja, bukan estimasi harga, commitment, atau
+spending cap. Demo mock lokal tidak memerlukan resource AWS berbayar.
 
 ## Validasi yang tersedia
 

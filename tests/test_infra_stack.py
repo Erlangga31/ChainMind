@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from aws_cdk import App
 from aws_cdk.assertions import Match, Template
 
@@ -207,3 +208,81 @@ def test_eventbridge_bedrock_and_operations_resources_are_present() -> None:
         assert len(agent["Properties"]["AgentResourceRoleArn"]["Fn::GetAtt"]) == 2
         assert agent["Properties"]["ActionGroups"]
         assert agent["Properties"]["GuardrailConfiguration"]
+
+
+def test_monthly_budget_notifies_at_eighty_percent_and_resources_are_tagged() -> None:
+    template = Template.from_stack(ChainMindStack(App(), "TestBudgetAndTags"))
+
+    template.has_resource_properties(
+        "AWS::Budgets::Budget",
+        {
+            "Budget": {
+                "BudgetType": "COST",
+                "TimeUnit": "MONTHLY",
+                "BudgetLimit": {"Amount": 100, "Unit": "USD"},
+                "CostFilters": {"TagKeyValue": ["user:Project$ChainMind"]},
+            }
+        },
+    )
+    template.has_resource_properties(
+        "AWS::Budgets::Budget",
+        {
+            "NotificationsWithSubscribers": Match.array_with(
+                [
+                    Match.object_like(
+                        {
+                            "Notification": {
+                                "ComparisonOperator": "GREATER_THAN",
+                                "NotificationType": "ACTUAL",
+                                "Threshold": 80,
+                                "ThresholdType": "PERCENTAGE",
+                            },
+                            "Subscribers": Match.array_with(
+                                [Match.object_like({"SubscriptionType": "SNS"})]
+                            ),
+                        }
+                    )
+                ]
+            )
+        },
+    )
+    template.has_resource_properties(
+        "AWS::SNS::Topic",
+        {
+            "KmsMasterKeyId": Match.any_value(),
+            "Tags": Match.array_with(
+                [
+                    {"Key": "Environment", "Value": "mock"},
+                    {"Key": "ManagedBy", "Value": "AWS-CDK"},
+                    {"Key": "Project", "Value": "ChainMind"},
+                ]
+            ),
+        },
+    )
+
+
+def test_budget_threshold_and_email_recipient_are_configurable() -> None:
+    app = App(
+        context={
+            "monthlyBudgetUsd": 250,
+            "budgetNotificationEmail": "owner@example.com",
+        }
+    )
+    template = Template.from_stack(ChainMindStack(app, "TestConfiguredBudget"))
+
+    template.has_resource_properties(
+        "AWS::Budgets::Budget",
+        {"Budget": {"BudgetLimit": {"Amount": 250, "Unit": "USD"}}},
+    )
+    template.has_resource_properties(
+        "AWS::SNS::Subscription",
+        {"Protocol": "email", "Endpoint": "owner@example.com"},
+    )
+
+
+@pytest.mark.parametrize("amount", ["0", "NaN", "Infinity"])
+def test_budget_rejects_nonpositive_or_nonfinite_threshold(amount: str) -> None:
+    app = App(context={"monthlyBudgetUsd": amount})
+
+    with pytest.raises(ValueError, match="monthlyBudgetUsd.*finite.*positive"):
+        ChainMindStack(app, "TestInvalidBudget")

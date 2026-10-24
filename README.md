@@ -97,6 +97,7 @@ CDK scaffold kini mencakup KMS, VPC/private subnets dan VPC endpoints, Cognito g
 ```powershell
 uv sync --extra dev
 uv run python scripts/run_demo.py
+uv run python scripts/run_demo.py --language en
 uv run uvicorn chainmind.api.main:app --app-dir src --reload
 ```
 
@@ -132,6 +133,10 @@ npm run dev
 ```
 
 Buka `http://localhost:5173`, klik **Sign in with ChainMind SSO**, lalu masuk sebagai `viewer` atau `approver` (password `demo`). Pilih skenario, lalu klik **Trigger demo disruption**. Dashboard menampilkan linimasa enam tahap, dampak stok, tabel serta grafik vendor, trace per sumber, audit log, feed notifikasi dengan sumber SAP, draf PO dengan dialog konfirmasi, tracking dan halaman KPI ilustratif. Viewer tetap read-only; hanya bearer token terverifikasi dengan role approver yang dapat mengirim keputusan. Tombol **Approve** pada feed hanya membuka dialog konfirmasi dan tidak mengeksekusi PO secara langsung.
+Gunakan kontrol **ID/EN** untuk mengganti bahasa; dashboard, notifikasi, dan `run_demo.py`
+mendukung bahasa Indonesia dan Inggris. Tampilan kontras tinggi dan teks besar dapat diaktifkan dari
+kontrol aksesibilitas. Tabel vendor menampilkan wilayah/jarak dan dampak BOM menandai komponen
+paling kritis; seluruh ranking tetap deterministik.
 
 ![Dashboard ChainMind dengan draf PO Vendor B yang menunggu persetujuan](./docs/screenshots/chainmind-pending-approval.png)
 
@@ -144,6 +149,16 @@ Cuplikan alur demo lain:
 ![Feed notifikasi](./docs/screenshots/notification-feed.png)
 ![Draf PO menunggu approval](./docs/screenshots/po-approval.png)
 ![KPI ilustratif](./docs/screenshots/kpis.png)
+
+Cuplikan dashboard berbahasa Indonesia:
+
+![Login ChainMind berbahasa Indonesia](./docs/screenshots/login-id.png)
+![Timeline enam tahap berbahasa Indonesia](./docs/screenshots/timeline-id.png)
+![Grafik vendor berbahasa Indonesia](./docs/screenshots/vendor-charts-id.png)
+![Ringkasan Chain of Thought berbahasa Indonesia](./docs/screenshots/chain-of-thought-id.png)
+![Feed notifikasi berbahasa Indonesia](./docs/screenshots/notification-feed-id.png)
+![Draf PO berbahasa Indonesia](./docs/screenshots/po-approval-id.png)
+![Halaman KPI berbahasa Indonesia](./docs/screenshots/kpis-id.png)
 
 Jalankan unit test, browser-test typecheck, E2E, dan build dari folder `dashboard`:
 
@@ -329,6 +344,10 @@ Berdasarkan proposal lokal di `docs/reference/ChainMind_Proposal.pdf`, matriks b
 | 11 — model bisnis | Partial | [business draft](./docs/BUSINESS.md), [marketplace packaging notes](./docs/MARKETPLACE.md) | usage-metering unit-tested; pricing/marketplace assumptions TBD |
 | 12 — KPI framework | Implemented (illustrative baselines) | [KPI API](./src/chainmind/api/main.py), [KPI models](./src/chainmind/core/models.py), [dashboard KPI page](./dashboard/src/) | unit-tested; run response time measured locally, comparison targets illustrative |
 | Tenant metering | Implemented (local scaffold) | [tenant auth](./src/chainmind/api/identity.py), [usage API](./src/chainmind/api/main.py), [usage page](./dashboard/src/components.tsx) | unit-tested; pricing defaults illustrative, no billing integration |
+| 21 — vendor locality and BOM impact | Implemented (seeded simulation) | [procurement](./src/chainmind/agents/procurement.py), [inventory fixtures](./src/chainmind/data/seed_inventory.json), [BOM impact UI](./dashboard/src/components.tsx) | unit-tested; supplier regions/distances and BOM are simulated |
+| 21 — bilingual/accessibility UI | Implemented | [translations](./dashboard/src/i18n.ts), [dashboard](./dashboard/src/App.tsx), [Playwright checks](./dashboard/e2e/auth-workflow.spec.ts) | dashboard unit/build, Playwright axe scan and 375px/1280px checks |
+| 21 — model-agnostic Bedrock configuration | Implemented (adapter configuration) | [settings](./src/chainmind/core/config.py), [Bedrock adapter](./src/chainmind/integrations/llm/bedrock.py), [fallback adapter](./src/chainmind/integrations/llm/bedrock_agents.py) | unit-tested configuration; model access and runtime behavior need real AWS |
+| 22 — release and cost readiness | Implemented (scaffold) | [CHANGELOG](./CHANGELOG.md), [CDK budget/tags](./infra/chainmind_stack.py), [deployment cost notes](./docs/DEPLOY.md), [jury pack](./docs/JURY_PACK.md) | CDK assertions and synth-only; live budget email and actual pricing need account review |
 | 13 — roadmap implementasi dan MVP | Partial | [demo guide](./docs/DEMO.md), [coverage audit](./docs/COVERAGE.md) | demo/sandbox verified; SAP BTP pilot remains a prerequisite |
 | 15 — risk | Partial | [risk register draft](./docs/BUSINESS.md) | documentation-only |
 | 16 — pendanaan / placeholders | Partial | [business draft](./docs/BUSINESS.md) | placeholders; no validated budget |
@@ -338,6 +357,12 @@ Lihat [docs/COVERAGE.md](./docs/COVERAGE.md) untuk audit yang lebih rinci serta 
 ## Kontribusi
 
 Lihat [CONTRIBUTING.md](./CONTRIBUTING.md) untuk langkah instalasi, pemeriksaan, dan cara mengajukan perubahan.
+
+## Rilis
+
+Versi proyek saat ini **1.0.0**. Lihat [CHANGELOG.md](./CHANGELOG.md) untuk ringkasan perubahan,
+[JURY_PACK.md](./docs/JURY_PACK.md) untuk klaim dan bukti demo, serta [DEPLOY.md](./docs/DEPLOY.md)
+untuk checklist biaya dan deployment yang belum pernah dijalankan.
 
 ## License
 
