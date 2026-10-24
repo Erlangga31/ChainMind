@@ -163,8 +163,8 @@ def test_aws_mode_mock_adapters_complete_full_disruption_against_localstack(
     )
     completed = pipeline.get_run(draft.run_id)
 
-    assert result.status is RunStatus.APPROVED
-    assert completed.status is RunStatus.APPROVED
+    assert result.status is RunStatus.EXECUTED
+    assert completed.status is RunStatus.EXECUTED
     assert completed.execution_tracking is not None
     assert completed.execution_tracking.shipment.estimated_arrival
     assert store.get_by_idempotency_key(event.dedupe_key) == completed
