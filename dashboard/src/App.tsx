@@ -10,6 +10,9 @@ import {
 import type { ApiError, DisruptionRun, KPIReport } from "./types";
 
 const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+const OIDC_ISSUER = import.meta.env.VITE_OIDC_ISSUER ?? "http://127.0.0.1:8100";
+const OIDC_CLIENT_ID = import.meta.env.VITE_OIDC_CLIENT_ID ?? "chainmind-dashboard";
+const OIDC_REDIRECT_URI = import.meta.env.VITE_OIDC_REDIRECT_URI ?? "http://localhost:5173/";
 const SCENARIOS = [
   {
     id: "weather",
@@ -45,6 +48,65 @@ const SCENARIOS = [
   },
 ] as const;
 
+type TokenClaims = {
+  sub: string;
+  roles?: string[];
+  "cognito:groups"?: string[];
+  exp: number;
+  nonce?: string;
+};
+
+type AuthSession = {
+  token: string;
+  subject: string;
+  role: "viewer" | "approver";
+  expiresAt: number;
+};
+
+let accessToken: string | null = null;
+let onSessionExpired: (() => void) | null = null;
+
+function decodeClaims(token: string): TokenClaims {
+  const encoded = token.split(".")[1];
+  if (!encoded) throw new Error("Identity provider returned a malformed token.");
+  const base64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
+  return JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "="))) as TokenClaims;
+}
+
+function randomBase64Url(size: number): string {
+  const bytes = window.crypto.getRandomValues(new Uint8Array(size));
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+async function beginLogin(): Promise<void> {
+  const state = randomBase64Url(32);
+  const nonce = randomBase64Url(32);
+  const verifier = randomBase64Url(48);
+  const digest = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  const challenge = btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+  sessionStorage.setItem("chainmind.oidc.state", state);
+  sessionStorage.setItem("chainmind.oidc.nonce", nonce);
+  sessionStorage.setItem("chainmind.oidc.verifier", verifier);
+  const authorizeUrl = new URL(`${OIDC_ISSUER}/oidc/authorize`);
+  authorizeUrl.search = new URLSearchParams({
+    response_type: "code",
+    client_id: OIDC_CLIENT_ID,
+    redirect_uri: OIDC_REDIRECT_URI,
+    scope: "openid profile",
+    state,
+    nonce,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+  }).toString();
+  window.location.assign(authorizeUrl.toString());
+}
+
 async function responseError(response: Response): Promise<Error> {
   let message = `Request failed with HTTP ${response.status}.`;
   try {
@@ -61,13 +123,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      ...(path.endsWith("/decision")
-        || path.includes("/notifications/links/")
-        ? { "X-ChainMind-Role": sessionStorage.getItem("chainmind.role") ?? "viewer" }
-        : {}),
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...init?.headers,
     },
   });
+  if (response.status === 401 && accessToken) onSessionExpired?.();
   if (!response.ok) throw await responseError(response);
   return (await response.json()) as T;
 }
@@ -93,15 +153,14 @@ function StatusPill({ status }: { status: string }) {
 }
 
 export default function App() {
+  const [session, setSession] = useState<AuthSession | null>(null);
   const [runs, setRuns] = useState<DisruptionRun[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [run, setRun] = useState<DisruptionRun | null>(null);
   const [decisionNote, setDecisionNote] = useState("");
   const [revisionVendorId, setRevisionVendorId] = useState("");
   const [scenarioId, setScenarioId] = useState<(typeof SCENARIOS)[number]["id"]>("weather");
-  const [role, setRole] = useState<"viewer" | "approver">(
-    sessionStorage.getItem("chainmind.role") === "approver" ? "approver" : "viewer",
-  );
+  const role = session?.role;
   const [page, setPage] = useState<"runs" | "kpis">("runs");
   const [apiMode, setApiMode] = useState("mock");
   const [kpis, setKpis] = useState<KPIReport | null>(null);
@@ -110,6 +169,78 @@ export default function App() {
   const [notificationToken, setNotificationToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  onSessionExpired = () => {
+    accessToken = null;
+    setSession(null);
+    setError("Your session expired. Sign in again to continue.");
+  };
+
+  useEffect(() => {
+    const callback = new URLSearchParams(window.location.search);
+    const code = callback.get("code");
+    if (!code) return;
+    const state = callback.get("state");
+    const expectedState = sessionStorage.getItem("chainmind.oidc.state");
+    const nonce = sessionStorage.getItem("chainmind.oidc.nonce");
+    const verifier = sessionStorage.getItem("chainmind.oidc.verifier");
+    window.history.replaceState({}, "", window.location.pathname);
+    sessionStorage.removeItem("chainmind.oidc.state");
+    sessionStorage.removeItem("chainmind.oidc.nonce");
+    sessionStorage.removeItem("chainmind.oidc.verifier");
+    if (!state || state !== expectedState || !nonce || !verifier) {
+      setError("The sign-in response could not be verified. Please sign in again.");
+      return;
+    }
+    void fetch(`${OIDC_ISSUER}/oidc/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: OIDC_CLIENT_ID,
+        redirect_uri: OIDC_REDIRECT_URI,
+        code,
+        code_verifier: verifier,
+      }),
+    })
+      .then(async (response) => {
+        if (!response.ok) throw await responseError(response);
+        return response.json() as Promise<{ access_token: string; id_token: string }>;
+      })
+      .then(({ id_token: identityToken }) => {
+        const claims = decodeClaims(identityToken);
+        const roles = claims.roles ?? claims["cognito:groups"] ?? [];
+        if (claims.nonce !== nonce || claims.exp <= Date.now() / 1000) {
+          throw new Error("The identity token expired or failed nonce validation.");
+        }
+        if (!roles.includes("viewer") && !roles.includes("approver")) {
+          throw new Error("The identity token does not contain a supported role.");
+        }
+        const nextSession = {
+          token: identityToken,
+          subject: claims.sub,
+          role: roles.includes("approver") ? "approver" : "viewer",
+          expiresAt: claims.exp * 1000,
+        } satisfies AuthSession;
+        accessToken = nextSession.token;
+        setSession(nextSession);
+        setError("");
+      })
+      .catch((caught: unknown) => {
+        setError(caught instanceof Error ? caught.message : "Sign-in failed.");
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    const remaining = session.expiresAt - Date.now();
+    if (remaining <= 0) {
+      onSessionExpired?.();
+      return;
+    }
+    const timer = window.setTimeout(() => onSessionExpired?.(), remaining);
+    return () => window.clearTimeout(timer);
+  }, [session]);
 
   const refreshRuns = useCallback(async (preferredId?: string) => {
     const items = await request<DisruptionRun[]>("/runs");
@@ -125,27 +256,30 @@ export default function App() {
   }, [selectedId]);
 
   useEffect(() => {
+    if (!session) return;
     void refreshRuns().catch((caught: unknown) => {
       setError(caught instanceof Error ? caught.message : "Could not load runs.");
     });
-  }, [refreshRuns]);
+  }, [refreshRuns, session]);
 
   useEffect(() => {
+    if (!session) return;
     void request<{ mode: string }>("/health")
       .then((health) => setApiMode(health.mode))
       .catch((caught: unknown) => {
         setError(caught instanceof Error ? caught.message : "Could not read API mode.");
       });
-  }, []);
+  }, [session]);
 
   useEffect(() => {
+    if (!session) return;
     const timer = window.setInterval(() => {
       void refreshRuns().catch((caught: unknown) => {
         setError(caught instanceof Error ? caught.message : "Could not refresh live run status.");
       });
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [refreshRuns]);
+  }, [refreshRuns, session]);
 
   useEffect(() => {
     const token = new URLSearchParams(window.location.search).get("approve");
@@ -162,13 +296,13 @@ export default function App() {
   }, [refreshRuns]);
 
   useEffect(() => {
-    if (page !== "kpis") return;
+    if (!session || page !== "kpis") return;
     void request<KPIReport>("/kpis")
       .then(setKpis)
       .catch((caught: unknown) => {
         setError(caught instanceof Error ? caught.message : "Could not load KPI data.");
       });
-  }, [page]);
+  }, [page, session]);
 
   const feasibleVendors = useMemo(
     () => run?.vendor_comparison.filter((evaluation) => evaluation.feasible) ?? [],
@@ -251,6 +385,38 @@ export default function App() {
     }
   }
 
+  function logout() {
+    accessToken = null;
+    setSession(null);
+    setRuns([]);
+    setRun(null);
+    setSelectedId("");
+    setError("");
+  }
+
+  if (!session) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-canvas p-6">
+        <section className="w-full max-w-md rounded-3xl bg-white p-8 shadow-card">
+          <p className="text-sm font-semibold uppercase tracking-widest text-accent">ChainMind SSO</p>
+          <h1 className="mt-2 text-2xl font-bold text-ink">Sign in to the control tower</h1>
+          <p className="mt-3 text-sm leading-6 text-slate-600">
+            Authenticate through the configured OIDC identity provider. Approval actions require the approver role.
+          </p>
+          {error && <p role="alert" className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
+          <button
+            className="mt-6 w-full rounded-xl bg-accent px-5 py-3 font-semibold text-white"
+            onClick={() => void beginLogin().catch((caught: unknown) => {
+              setError(caught instanceof Error ? caught.message : "Could not start sign-in.");
+            })}
+          >
+            Sign in with ChainMind SSO
+          </button>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-canvas">
       <header className="bg-ink text-white">
@@ -263,22 +429,8 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <label className="text-xs text-slate-300">
-              Mock SSO role
-              <select
-                aria-label="Mock SSO role"
-                className="ml-2 rounded-lg border border-slate-600 bg-slate-800 px-2 py-1 text-white"
-                value={role}
-                onChange={(event) => {
-                  const nextRole = event.target.value as "viewer" | "approver";
-                  setRole(nextRole);
-                  sessionStorage.setItem("chainmind.role", nextRole);
-                }}
-              >
-                <option value="viewer">Viewer</option>
-                <option value="approver">Approver</option>
-              </select>
-            </label>
+            <span className="text-xs text-slate-300">{session.subject} · {role}</span>
+            <button className="rounded-lg border border-slate-500 px-3 py-1 text-xs text-white" onClick={logout}>Logout</button>
             <span className="rounded-full border border-teal-300/40 px-3 py-1 text-xs font-semibold text-teal-200">
               {apiMode === "mock" ? "MOCK MODE" : `${apiMode.toUpperCase()} MODE`}
             </span>
@@ -471,7 +623,7 @@ export default function App() {
                           <p className="text-xs leading-5 text-slate-500">Approve executes the PO in the configured SAP adapter. Reject and revise do not execute a purchase.</p>
                         </div>
                       )}
-                      {pending && role === "viewer" && <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Viewer access is read-only. Switch to Approver in Mock SSO to submit a decision.</p>}
+                      {pending && role === "viewer" && <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Viewer access is read-only. Sign in with an approver account to submit a decision.</p>}
                     </>
                   ) : <p className="mt-4 text-sm text-slate-500">No purchase order was created for this run.</p>}
                 </section>

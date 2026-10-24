@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     sap_backend: Literal["mock", "sandbox", "real"] | None = None
     llm_backend: Literal["mock", "bedrock", "bedrock_agents"] | None = None
     aws_region: str = "us-east-1"
+    auth_issuer: str = "http://127.0.0.1:8100"
+    auth_audience: str = "chainmind-dashboard"
+    auth_jwks_url: str = "http://127.0.0.1:8100/.well-known/jwks.json"
+    auth_dev_bypass: bool = False
     bedrock_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0"
     bedrock_agent_id: str | None = None
     bedrock_agent_alias_id: str | None = None

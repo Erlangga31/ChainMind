@@ -74,9 +74,9 @@ Sandbox SAP lokal pada `sandbox/sap_sandbox/` menyediakan endpoint OData, vendor
 
 Event Mesh simulator mengirim event ke `/event-bridge` dengan HMAC-SHA256. Untuk menjalankan kedua proses lokal, isi `CHAINMIND_EVENT_BRIDGE_SECRET` dan `SAP_SANDBOX_EVENT_BRIDGE_SECRET` dengan shared secret yang sama dan non-empty. `OpenMeteoWeatherClient` adalah integrasi opsional yang disabled by default; sumber gangguan lain memakai skenario mock offline.
 
-Stack CDK mendefinisikan service AWS dan callback wait. API keputusan pada jalur AWS melanjutkan callback Step Functions; Cognito authorizer dan group role tersedia sebagai scaffold. Dashboard browser masih memakai role selector mock, sehingga OAuth/Cognito sign-in belum terhubung dan stack belum siap dipakai sebagai deployment produksi.
+Stack CDK mendefinisikan service AWS dan callback wait. API keputusan pada jalur AWS melanjutkan callback Step Functions; Cognito authorizer meneruskan bearer ID token yang diverifikasi backend menggunakan issuer, audience, dan JWKS Cognito.
 
-CDK scaffold kini mencakup KMS, VPC/private subnets dan VPC endpoints, Cognito groups dan authorizer, API throttling/access logs, CloudTrail, alarms, serta dashboard CloudWatch. Run snapshots dan audit/trace artifact diarsipkan ke S3 pada AWS mode. Sintesis template bukan bukti bahwa Lambda siap deploy atau bahwa integrasi AWS/SAP sudah berjalan; lihat [docs/DEPLOY.md](./docs/DEPLOY.md) sebelum mempertimbangkan deployment.
+CDK scaffold kini mencakup KMS, VPC/private subnets dan VPC endpoints, Cognito groups dan authorizer, API throttling/access logs, CloudTrail, alarms, serta dashboard CloudWatch. API memverifikasi bearer JWT terhadap issuer, audience, JWKS, dan expiry. Run snapshots dan audit/trace artifact diarsipkan ke S3 pada AWS mode. Sintesis template bukan bukti bahwa Lambda siap deploy atau bahwa integrasi AWS/SAP sudah berjalan; lihat [docs/DEPLOY.md](./docs/DEPLOY.md) sebelum mempertimbangkan deployment.
 
 ## Tech stack
 
@@ -104,6 +104,17 @@ API tersedia di `http://localhost:8000`; OpenAPI UI di `http://localhost:8000/do
 Endpoint utama mencakup `POST /disruptions`, `GET /runs`, `GET /runs/{run_id}`,
 `POST /runs/{run_id}/decision`, dan `GET /kpis`. KPI mengagregasi run yang sudah selesai
 tracking; biaya dan savings ditandai simulasi/ilustratif, bukan proyeksi finansial.
+Keputusan membutuhkan bearer token OIDC dengan role `approver`; role tidak pernah dipilih melalui header. Bypass lokal hanya tersedia dengan `CHAINMIND_AUTH_DEV_BYPASS=true` saat `CHAINMIND_MODE=mock`, dan tetap mati secara default.
+
+### Fake OIDC provider
+
+Jalankan SAP sandbox di terminal terpisah agar login lokal tersedia:
+
+```powershell
+uv run uvicorn sap_sandbox.main:app --app-dir sandbox --host 127.0.0.1 --port 8100 --reload
+```
+
+Sandbox menyediakan discovery OIDC, JWKS RS256, authorization code + PKCE, dan dua akun demo (`viewer` atau `approver`, password `demo`). Dashboard memakai token di memori; logout atau expiry mengakhiri sesi. API di luar mock memakai bearer ID token yang diterbitkan IdP dan memeriksa audience/issuer/signature/expiry.
 
 ### Dashboard
 
@@ -115,7 +126,7 @@ npm ci
 npm run dev
 ```
 
-Buka alamat Vite (umumnya `http://localhost:5173`), pilih skenario, lalu klik **Trigger demo disruption**. Dashboard menampilkan linimasa enam tahap, dampak stok, tabel serta grafik vendor, trace per sumber, audit log, draf PO dengan dialog konfirmasi, tracking dan halaman KPI ilustratif. Role switch Viewer/Approver adalah simulasi UI untuk demo lokal; default-nya Viewer dan pilihan tersimpan di `sessionStorage`. Header role bukan autentikasi produksi dan tidak boleh digunakan sebagai kontrol keamanan di deployment.
+Buka `http://localhost:5173`, klik **Sign in with ChainMind SSO**, lalu masuk sebagai `viewer` atau `approver` (password `demo`). Pilih skenario, lalu klik **Trigger demo disruption**. Dashboard menampilkan linimasa enam tahap, dampak stok, tabel serta grafik vendor, trace per sumber, audit log, draf PO dengan dialog konfirmasi, tracking dan halaman KPI ilustratif. Viewer tetap read-only; hanya bearer token terverifikasi dengan role approver yang dapat mengirim keputusan.
 
 Jalankan tes dan build dashboard dengan `npm test` dan `npm run build` dari folder `dashboard`.
 
@@ -158,6 +169,10 @@ Salin `.env.example` ke `.env` bila ingin mengubah konfigurasi lokal. `.env` tid
 | Variabel | Default | Kegunaan |
 | --- | --- | --- |
 | `CHAINMIND_MODE` | `mock` | Pilihan adapter: `mock` atau `aws` |
+| `CHAINMIND_AUTH_ISSUER` | `http://127.0.0.1:8100` | OIDC issuer yang dipercaya API |
+| `CHAINMIND_AUTH_AUDIENCE` | `chainmind-dashboard` | Audience ID token yang harus cocok |
+| `CHAINMIND_AUTH_JWKS_URL` | `http://127.0.0.1:8100/.well-known/jwks.json` | Endpoint key set untuk verifikasi signature |
+| `CHAINMIND_AUTH_DEV_BYPASS` | `false` | Bypass lokal khusus mock; jangan aktifkan di lingkungan bersama/produksi |
 | `CHAINMIND_SAP_BACKEND` | preset dari `CHAINMIND_MODE` | Pilihan SAP: `mock`, `sandbox`, `real` |
 | `CHAINMIND_LLM_BACKEND` | preset dari `CHAINMIND_MODE` | Pilihan model: `mock`, `bedrock`, `bedrock_agents` |
 | `CHAINMIND_AWS_REGION` | `us-east-1` | AWS region untuk boto3 dan Bedrock |
@@ -196,10 +211,13 @@ Salin `.env.example` ke `.env` bila ingin mengubah konfigurasi lokal. `.env` tid
 | `SAP_SANDBOX_EVENT_WEBHOOK_URL` | `http://127.0.0.1:8000/event-bridge` | Tujuan webhook Event Mesh simulator lokal |
 | `SAP_SANDBOX_EVENT_BRIDGE_SECRET` | — | HMAC secret yang harus sama dengan `CHAINMIND_EVENT_BRIDGE_SECRET` |
 | `SAP_SANDBOX_WORKFLOW_CALLBACK_URL` | `http://127.0.0.1:8000` | Base URL callback workflow simulator lokal |
+| `SAP_SANDBOX_OIDC_ISSUER` | `http://127.0.0.1:8100` | Issuer fake OIDC sandbox |
+| `SAP_SANDBOX_OIDC_AUDIENCE` | `chainmind-dashboard` | Audience token demo |
+| `SAP_SANDBOX_OIDC_CLIENT_ID` | `chainmind-dashboard` | Client ID public untuk authorization code flow |
+| `SAP_SANDBOX_OIDC_REDIRECT_URI` | `http://localhost:5173/` | Callback SPA yang diizinkan IdP |
 
 AWS credentials tidak dimasukkan ke berkas konfigurasi proyek: boto3 menggunakan AWS credential chain standar.
 Gunakan kredensial dummy hanya untuk SAP sandbox lokal. Backend `real` belum diverifikasi terhadap tenant SAP asli.
-Header `X-ChainMind-Role` dipakai sebagai role demo pada API lokal (dashboard default ke `viewer`; role `approver` dipilih eksplisit). Header ini bukan autentikasi produksi. CDK menambahkan Cognito authorizer dan meneruskan group claim terverifikasi, tetapi OAuth/PKCE dashboard belum terhubung.
 
 ### SAP sandbox lokal
 

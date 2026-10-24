@@ -936,6 +936,13 @@ class ChainMindStack(Stack):
             cognito_user_pools=[user_pool],
             authorizer_name="chainmind-cognito",
         )
+        cognito_issuer = f"https://cognito-idp.{self.region}.amazonaws.com/{user_pool.user_pool_id}"
+        api_handler.add_environment("CHAINMIND_AUTH_ISSUER", cognito_issuer)
+        api_handler.add_environment("CHAINMIND_AUTH_AUDIENCE", dashboard_client.user_pool_client_id)
+        api_handler.add_environment(
+            "CHAINMIND_AUTH_JWKS_URL",
+            f"{cognito_issuer}/.well-known/jwks.json",
+        )
         api_access_logs = logs.LogGroup(
             self,
             "ApiGatewayAccessLogs",
@@ -955,7 +962,7 @@ class ChainMindStack(Stack):
             default_cors_preflight_options=apigateway.CorsOptions(
                 allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
                 allow_methods=["GET", "POST", "OPTIONS"],
-                allow_headers=["Authorization", "Content-Type", "X-ChainMind-Role"],
+                allow_headers=["Authorization", "Content-Type"],
             ),
             deploy_options=apigateway.StageOptions(
                 stage_name="v1",

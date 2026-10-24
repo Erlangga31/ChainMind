@@ -10,6 +10,9 @@ flowchart TD
     Sandbox -->|HMAC signed| Bridge[Event Mesh bridge]
     Bridge --> EB
     UI[React + Vite dashboard] --> API[FastAPI]
+    UI -->|Authorization Code + PKCE| OIDC[Sandbox OIDC / Cognito]
+    OIDC -->|RS256 ID token + roles| UI
+    UI -->|Bearer token| API
     API --> Core[Framework-agnostic core pipeline]
     EB --> SF[AWS Step Functions]
     SF --> M[1. Monitoring Agent]
@@ -56,14 +59,15 @@ For local development the FastAPI route calls the same sequential pipeline used 
 | 2. Logistics | `LogisticsAgent` | Seed stock and consumption | Logistics Lambda; estimates stockout days and line loss |
 | 3. Procurement | `ProcurementAgent` | Seed Ariba quotes | Procurement Lambda; SAP Ariba Network through SAP Integration Suite |
 | 4. Orchestration | `OrchestratorAgent`, `LLMClient` | Deterministic `MockLLMClient` | Four Bedrock Agents, aliases, Lambda action groups, and shared guardrail; model output explains but cannot change Python's selection |
-| Human approval | Shared transition definition, bounded revision count, approver-role check | FastAPI role header for demo only | Step Functions task token; API sends success/failure callbacks, rejection is caught as a non-execution terminal path |
+| Human approval | Shared transition definition, bounded revision count, verified JWT approver-role check | Sandbox OIDC authorization code + PKCE, signed RS256 tokens and JWKS | API Gateway Cognito authorizer; API validates issuer, audience, signature, expiry, and approver group before Step Functions callbacks |
 | PO execution | `SAPClient.execute_purchase_order` | Mock S/4HANA in-memory record | S/4HANA via SAP Integration Suite, only after approval |
 | Execution and tracking | `TrackingAgent`, typed confirmation/ASN/projection/KPI models | Ariba sandbox confirms the submitted PO and returns a vendor-specific ETA; projection is separate from current stock | Tracking Lambda after execution; Ariba confirmation/ASN; custom S/4HANA projection API |
 | KPI reporting | `RunKPI`, aggregate `GET /kpis` | Values marked simulated/illustrative | DynamoDB-backed run aggregation; not a financial forecast |
 | Notifications | `NotificationService` and `Notifier` contract | Console, JSONL email outbox, configurable mock webhooks | Teams/Slack webhooks, SES, scheduled pending-approval scan, Step Functions timeout escalation |
 | Run/audit storage | `RunStore` contract | SQLite snapshots and unique idempotency key (configurable, defaults to `data/chainmind-events.sqlite3`) | KMS-encrypted DynamoDB run records and event-key index; versioned S3 run audit/trace artifacts |
 
-The separate local SAP sandbox (`sandbox/sap_sandbox/`) exposes OData-like S/4HANA material-stock
+The separate local SAP sandbox (`sandbox/sap_sandbox/`) exposes OIDC discovery, an authorization-code
+login for seeded viewer/approver users, PKCE token exchange, RS256 JWTs and JWKS in addition to OData-like S/4HANA material-stock
 and purchase-order routes, seeded Ariba vendors, an HMAC-signed Event Mesh webhook simulator, and
 a Business Workflow approval callback simulator. It also requires an Ariba PO submission before
 returning supplier confirmation or ASN data, and stores projected stock separately from current

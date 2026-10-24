@@ -18,6 +18,7 @@ from uuid import uuid4
 import httpx
 from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sap_sandbox.config import SandboxSettings, get_sandbox_settings
 from sap_sandbox.models import (
@@ -28,6 +29,7 @@ from sap_sandbox.models import (
     WorkflowDraftUpdate,
     WorkflowTaskRequest,
 )
+from sap_sandbox.oidc import add_oidc_routes
 from starlette.responses import Response
 from starlette.status import HTTP_400_BAD_REQUEST, HTTP_409_CONFLICT, HTTP_502_BAD_GATEWAY
 
@@ -185,6 +187,19 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
     )
     vendors = load_vendors()
     app = FastAPI(title="ChainMind Local SAP Sandbox", version="0.1.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[sandbox_settings.oidc_redirect_uri.rstrip("/")],
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type"],
+    )
+    add_oidc_routes(
+        app,
+        issuer=sandbox_settings.oidc_issuer,
+        audience=sandbox_settings.oidc_audience,
+        client_id=sandbox_settings.oidc_client_id,
+        redirect_uri=sandbox_settings.oidc_redirect_uri,
+    )
     app.state.sandbox = state
     app.state.csrf_token = secrets.token_urlsafe(24)
     app.state.access_tokens: dict[str, float] = {}
@@ -759,7 +774,6 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
             await post_webhook(
                 callback_url,
                 callback_payload,
-                headers={"X-ChainMind-Role": "approver"},
             )
         except httpx.HTTPError:
             async with state.workflow_lock:

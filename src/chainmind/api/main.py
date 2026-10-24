@@ -3,14 +3,16 @@
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import FastAPI, Header, Request
+from fastapi import Depends, FastAPI, Header, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from chainmind.api.identity import AuthenticatedUser, require_approver
 from chainmind.core.config import get_settings
 from chainmind.core.errors import ChainMindError
 from chainmind.core.models import (
@@ -47,9 +49,9 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=[
         "Content-Type",
+        "Authorization",
         "X-ChainMind-Signature",
         "Idempotency-Key",
-        "X-ChainMind-Role",
     ],
 )
 
@@ -253,7 +255,7 @@ def inspect_notification_link(token: str) -> dict[str, object]:
 def approve_from_notification_link(
     token: str,
     confirmation: NotificationApprovalRequest,
-    role: str | None = Header(default=None, alias="X-ChainMind-Role"),
+    approver: Annotated[AuthenticatedUser, Depends(require_approver)],
 ) -> DecisionResult:
     """Require both an authenticated approver role and explicit link confirmation."""
 
@@ -262,12 +264,6 @@ def approve_from_notification_link(
         raise ChainMindError(
             "notification_action_mismatch",
             "This notification link is not an approval link.",
-            status_code=403,
-        )
-    if role != "approver":
-        raise ChainMindError(
-            "approver_role_required",
-            "Only a user with the approver role can decide a purchase order.",
             status_code=403,
         )
     if not confirmation.confirmed:
@@ -279,7 +275,7 @@ def approve_from_notification_link(
     return decide(
         claims.run_id,
         DecisionRequest(decision=DecisionType.APPROVE, note=confirmation.note),
-        role,
+        approver,
     )
 
 
@@ -294,18 +290,12 @@ def get_run(run_id: UUID) -> DisruptionRun:
 def decide(
     run_id: UUID,
     decision: DecisionRequest,
-    role: str | None = Header(default=None, alias="X-ChainMind-Role"),
+    approver: Annotated[AuthenticatedUser, Depends(require_approver)],
 ) -> DecisionResult:
     """Record an approval, rejection, or requested vendor revision."""
 
-    if role != "approver":
-        raise ChainMindError(
-            "approver_role_required",
-            "Only a user with the approver role can decide a purchase order.",
-            status_code=403,
-        )
     if settings.mode == "aws":
-        result = _decide_aws(run_id, decision, role)
+        result = _decide_aws(run_id, decision, approver.subject)
     else:
         result = pipeline.decide(run_id, decision)
     _structured_log(
@@ -369,7 +359,7 @@ def _decide_aws(run_id: UUID, decision: DecisionRequest, role: str) -> DecisionR
     run.audit_log.append(
         AuditEntry(
             agent="human",
-            input_summary=f"run_id={run.run_id}; role={role}",
+            input_summary=f"run_id={run.run_id}; subject={role}",
             output_summary=f"Decision submitted: {decision.decision.value}.",
             reasoning=decision.note or "Authorized approver decision sent to Step Functions.",
         )

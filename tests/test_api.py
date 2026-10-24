@@ -1,14 +1,28 @@
 """HTTP-level tests for the disruption and human decision endpoints."""
 
 import pytest
+from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
 
 import chainmind.api.main as api
+from chainmind.api.identity import AuthenticatedUser, authenticated_user
 from chainmind.core.config import Settings
 from chainmind.core.events import EventStore
 from chainmind.factory import create_pipeline
 
 client = TestClient(api.app)
+
+
+def fake_authenticated_user(request: Request) -> AuthenticatedUser:
+    """Return deterministic test identities without bypassing route authorization."""
+
+    authorization = request.headers.get("Authorization", "")
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401)
+    subject = authorization.removeprefix("Bearer ")
+    if subject == "test-approver":
+        return AuthenticatedUser(subject=subject, roles=frozenset({"approver"}))
+    return AuthenticatedUser(subject=subject, roles=frozenset({"viewer"}))
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +37,7 @@ def isolate_api_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
             EventStore(),
         ),
     )
+    monkeypatch.setitem(api.app.dependency_overrides, authenticated_user, fake_authenticated_user)
 
 
 def test_disruption_api_lists_run_and_records_rejection() -> None:
@@ -46,13 +61,13 @@ def test_disruption_api_lists_run_and_records_rejection() -> None:
     decision = client.post(
         f"/runs/{run_id}/decision",
         json={"decision": "reject", "note": "Need supervisor review."},
-        headers={"X-ChainMind-Role": "approver"},
+        headers={"Authorization": "Bearer test-approver"},
     )
     assert decision.status_code == 200
     assert decision.json()["status"] == "REJECTED"
 
 
-def test_viewer_and_missing_role_cannot_submit_decisions() -> None:
+def test_viewer_and_missing_token_cannot_submit_decisions() -> None:
     run = client.post(
         "/disruptions",
         json={
@@ -64,12 +79,11 @@ def test_viewer_and_missing_role_cannot_submit_decisions() -> None:
     url = f"/runs/{run['run_id']}/decision"
     payload = {"decision": "reject", "note": "Viewer must not approve."}
 
-    viewer = client.post(url, json=payload, headers={"X-ChainMind-Role": "viewer"})
+    viewer = client.post(url, json=payload, headers={"Authorization": "Bearer test-viewer"})
     missing = client.post(url, json=payload)
 
     assert viewer.status_code == 403
-    assert viewer.json()["code"] == "approver_role_required"
-    assert missing.status_code == 403
+    assert missing.status_code == 401
 
 
 def test_validation_and_health_responses_are_structured() -> None:
@@ -97,7 +111,7 @@ def test_kpis_include_only_completed_tracking_and_are_labeled_illustrative() -> 
     approved = client.post(
         f"/runs/{run_id}/decision",
         json={"decision": "approve"},
-        headers={"X-ChainMind-Role": "approver"},
+        headers={"Authorization": "Bearer test-approver"},
     )
     assert approved.status_code == 200
     report = client.get("/kpis")
@@ -114,10 +128,10 @@ def test_dashboard_loopback_origin_is_allowed_by_cors() -> None:
         headers={
             "Origin": "http://127.0.0.1:5173",
             "Access-Control-Request-Method": "POST",
-            "Access-Control-Request-Headers": "content-type,x-chainmind-role",
+            "Access-Control-Request-Headers": "content-type,authorization",
         },
     )
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
-    assert "x-chainmind-role" in response.headers["access-control-allow-headers"].lower()
+    assert "authorization" in response.headers["access-control-allow-headers"].lower()

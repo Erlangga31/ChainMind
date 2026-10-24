@@ -310,7 +310,7 @@ def test_workflow_task_is_idempotent_and_callback_runs_once(monkeypatch: Any) ->
         (
             "http://chainmind.test/runs/run-123/decision",
             {"decision": "approve", "note": "Approved for demo."},
-            {"X-ChainMind-Role": "approver"},
+            None,
         )
     ]
 

@@ -218,8 +218,22 @@ def test_eta_deviation_triggers_tracking_alert() -> None:
 
 
 def test_signed_approval_requires_role_and_explicit_confirmation() -> None:
+    from fastapi import HTTPException, Request
+
+    from chainmind.api.identity import AuthenticatedUser, authenticated_user
     from chainmind.api.main import app, pipeline
 
+    def test_user(request: Request) -> AuthenticatedUser:
+        authorization = request.headers.get("Authorization", "")
+        if not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401)
+        role = authorization.removeprefix("Bearer ")
+        return AuthenticatedUser(
+            subject=role,
+            roles=frozenset({"approver"} if role == "test-approver" else {"viewer"}),
+        )
+
+    app.dependency_overrides[authenticated_user] = test_user
     client = TestClient(app)
     created = client.post(
         "/disruptions",
@@ -240,23 +254,24 @@ def test_signed_approval_requires_role_and_explicit_confirmation() -> None:
     unconfirmed = client.post(
         f"{link}/approve",
         json={"confirmed": False},
-        headers={"X-ChainMind-Role": "approver"},
+        headers={"Authorization": "Bearer test-approver"},
     )
     viewer = client.post(
         f"{link}/approve",
         json={"confirmed": True},
-        headers={"X-ChainMind-Role": "viewer"},
+        headers={"Authorization": "Bearer test-viewer"},
     )
     assert unconfirmed.status_code == 422
     assert viewer.status_code == 403
     approved = client.post(
         f"{link}/approve",
         json={"confirmed": True, "note": "Approved after review."},
-        headers={"X-ChainMind-Role": "approver"},
+        headers={"Authorization": "Bearer test-approver"},
     )
 
     assert approved.status_code == 200
     assert approved.json()["status"] == "EXECUTED"
+    app.dependency_overrides.pop(authenticated_user, None)
 
 
 def test_aws_overdue_handler_marks_pending_run_and_audits_notification(
