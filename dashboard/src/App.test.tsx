@@ -14,8 +14,9 @@ function makeJwt(role: "viewer" | "approver"): string {
   return `header.${btoa(JSON.stringify(claims))}.signature`;
 }
 
-function installAuthenticatedFetch(role: "viewer" | "approver") {
+function installAuthenticatedFetch(role: "viewer" | "approver", language: "id" | "en" = "en") {
   const idToken = makeJwt(role);
+  localStorage.setItem("chainmind.language", language);
   sessionStorage.setItem("chainmind.oidc.state", "expected-state");
   sessionStorage.setItem("chainmind.oidc.nonce", "expected-nonce");
   sessionStorage.setItem("chainmind.oidc.verifier", "test-verifier");
@@ -62,6 +63,9 @@ describe("OIDC-authenticated approval dashboard", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     sessionStorage.clear();
+    localStorage.clear();
+    delete document.documentElement.dataset.fontScale;
+    delete document.documentElement.dataset.highContrast;
     window.history.replaceState({}, "", "/");
   });
 
@@ -136,5 +140,20 @@ describe("OIDC-authenticated approval dashboard", () => {
 
     expect(await screen.findByText("Usage & Plan")).toBeInTheDocument();
     expect(await screen.findByText("$1,700")).toBeInTheDocument();
+  });
+
+  it("defaults to Indonesian and exposes language and accessibility controls", async () => {
+    installAuthenticatedFetch("approver", "id");
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "Gangguan" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Feed notifikasi" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "EN" }));
+    expect(await screen.findByRole("button", { name: "Disruptions" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Larger text" }));
+    fireEvent.click(screen.getByRole("button", { name: "High contrast" }));
+    expect(document.documentElement.dataset.fontScale).toBe("large");
+    expect(document.documentElement.dataset.contrast).toBe("high");
   });
 });

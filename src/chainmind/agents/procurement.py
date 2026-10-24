@@ -29,6 +29,14 @@ class ProcurementAgent:
 
         vendors = self._ariba.list_alternative_vendors(event)
         evaluations = [self._evaluate(vendor, inventory, logistics) for vendor in vendors]
+        evaluations.sort(
+            key=lambda item: (
+                not item.feasible,
+                not item.same_region,
+                item.vendor.distance_km,
+                item.risk_adjusted_total,
+            )
+        )
         summary = (
             f"Compared {len(evaluations)} vendors; "
             f"{sum(item.feasible for item in evaluations)} are feasible."
@@ -59,16 +67,22 @@ class ProcurementAgent:
         )
         original_stockout = logistics.stockout_days
         reduced_stockout = max(vendor.lead_time_days - logistics.coverage_days, 0.0)
-        feasible = vendor.capacity >= inventory.purchase_quantity and (
+        capacity_sufficient = vendor.capacity >= inventory.purchase_quantity
+        meets_deadline = (
             vendor.lead_time_days
             <= logistics.coverage_days + self._settings.stockout_tolerance_days
-            or reduced_stockout < original_stockout
         )
+        feasible = capacity_sufficient and (meets_deadline or reduced_stockout < original_stockout)
+        same_region = vendor.region.casefold() == inventory.plant_region.casefold()
         total = action_cost + residual_loss
         rationale = (
             f"{vendor.vendor_name}: ${action_cost:,.0f} landed action cost plus "
             f"${residual_loss:,.0f} risk-adjusted residual loss "
             f"({residual_days:g} reserve-adjusted stockout days); "
+            f"{vendor.distance_km:g} km from the plant in {vendor.region}; "
+            f"{'same-region' if same_region else 'cross-region'} sourcing; "
+            f"{'capacity sufficient' if capacity_sufficient else 'capacity insufficient'}; "
+            f"{'meets coverage deadline' if meets_deadline else 'misses coverage deadline'}; "
             f"{'feasible' if feasible else 'not feasible'}."
         )
         return VendorEvaluation(
@@ -79,4 +93,7 @@ class ProcurementAgent:
             residual_stockout_loss=residual_loss,
             risk_adjusted_total=total,
             rationale=rationale,
+            same_region=same_region,
+            capacity_sufficient=capacity_sufficient,
+            meets_deadline=meets_deadline,
         )

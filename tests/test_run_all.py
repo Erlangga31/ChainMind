@@ -59,3 +59,16 @@ def test_demo_groups_internal_stages_into_the_proposal_six_stage_flow() -> None:
         "Eksekusi Purchase Order",
     ]
     assert "WAITING_FOR_APPROVAL, WAITING_FOR_APPROVAL" in result[-1]
+
+
+def test_demo_can_render_the_six_stage_labels_in_english() -> None:
+    from chainmind.core.models import StageResult
+    from scripts.run_demo import format_demo_stages
+
+    result = format_demo_stages(
+        [StageResult(name="Monitoring", status="COMPLETED", summary="Detected.")],
+        language="en",
+    )
+
+    assert result[0].startswith("[Disruption detection]")
+    assert result[1].startswith("[Impact analysis]")

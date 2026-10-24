@@ -80,13 +80,19 @@ class DisruptionPipeline:
         self._store.save(run)
         try:
             self._transition(run, WorkflowState.MONITORING)
-            inventory = retry_integration_call(
-                lambda: self._sap.get_inventory(event.component_id),
-                attempts=self._settings.retry_attempts,
-                base_delay_seconds=self._settings.retry_base_delay_seconds,
-            )
+            component_ids = list(dict.fromkeys([event.component_id, *event.affected_component_ids]))
+            inventories = [
+                retry_integration_call(
+                    lambda component_id=component_id: self._sap.get_inventory(component_id),
+                    attempts=self._settings.retry_attempts,
+                    base_delay_seconds=self._settings.retry_base_delay_seconds,
+                )
+                for component_id in component_ids
+            ]
+            logistics, run.material_impacts = self._logistics.analyze_components(event, inventories)
+            inventory = logistics.inventory
             run.inventory_snapshot = inventory.model_copy(deep=True)
-            coverage = inventory.current_stock / inventory.daily_consumption
+            coverage = logistics.coverage_days
             affected_records = retry_integration_call(
                 lambda: self._sap.find_affected_records(event),
                 attempts=self._settings.retry_attempts,
@@ -124,7 +130,6 @@ class DisruptionPipeline:
                 return run
 
             self._transition(run, WorkflowState.LOGISTICS)
-            logistics = self._logistics.analyze(event, inventory)
             run.cost_of_inaction = logistics.cost_of_inaction
             run.chain_of_thought.append(logistics.reasoning)
             run.audit_log.append(
@@ -139,8 +144,14 @@ class DisruptionPipeline:
             self._store.save(run)
 
             self._transition(run, WorkflowState.PROCUREMENT)
+            procurement_event = event.model_copy(
+                update={
+                    "component_id": inventory.component_id,
+                    "component_name": inventory.component_name,
+                }
+            )
             procurement = retry_integration_call(
-                lambda: self._procurement.compare(event, inventory, logistics),
+                lambda: self._procurement.compare(procurement_event, inventory, logistics),
                 attempts=self._settings.retry_attempts,
                 base_delay_seconds=self._settings.retry_base_delay_seconds,
             )
@@ -149,7 +160,7 @@ class DisruptionPipeline:
             run.audit_log.append(
                 audit_for(
                     procurement,
-                    f"component={event.component_id}; quantity={inventory.purchase_quantity}",
+                    f"component={inventory.component_id}; quantity={inventory.purchase_quantity}",
                 )
             )
             run.stages.append(

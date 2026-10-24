@@ -24,7 +24,32 @@ select {
 }
 
 button:focus-visible,
-select:focus-visible {
+select:focus-visible,
+input:focus-visible,
+a:focus-visible {
   outline: 3px solid #5eead4;
   outline-offset: 2px;
+}
+
+:root[data-font-scale="large"] {
+  font-size: 18px;
+}
+
+:root[data-contrast="high"] body {
+  background: #fff;
+  color: #000;
+}
+
+:root[data-contrast="high"] .bg-white,
+:root[data-contrast="high"] .bg-slate-50 {
+  background-color: #fff !important;
+  border: 2px solid #111;
+}
+
+:root[data-contrast="high"] .text-slate-300,
+:root[data-contrast="high"] .text-slate-500,
+:root[data-contrast="high"] .text-slate-600,
+:root[data-contrast="high"] .text-slate-700,
+:root[data-contrast="high"] .text-ink {
+  color: #111 !important;
 }

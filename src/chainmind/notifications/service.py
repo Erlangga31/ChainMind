@@ -35,31 +35,78 @@ class NotificationService:
             raise ValueError("Workflow notifications require a purchase-order draft.")
         inventory = run.inventory_snapshot
         coverage_days = inventory.current_stock / inventory.daily_consumption if inventory else 0
-        source_text = f"Stock for {coverage_days:g} days"
+        is_indonesian = run.event.language == "id"
+        source_text = (
+            f"Stok cukup untuk {coverage_days:g} hari"
+            if is_indonesian
+            else f"Stock for {coverage_days:g} days"
+        )
         if event_kind == "draft_ready":
-            subject = f"Approval requested: {run.event.component_name}"
-            decision_summary = run.chain_of_thought[-1] if run.chain_of_thought else run.event.title
-            recommendation = (
-                f"Recommendation: buy from {run.draft_po.vendor_name} at "
-                f"${run.draft_po.total_price:,.0f} (source: SAP Ariba)."
+            subject = (
+                f"Persetujuan diminta: {run.event.component_name}"
+                if is_indonesian
+                else f"Approval requested: {run.event.component_name}"
             )
-            body = (
-                f"Raw material {run.event.component_name} delayed {run.event.delay_days:g} days. "
-                f"{source_text} (source: SAP S/4HANA). {recommendation}\n"
-                f"Decision summary: {decision_summary}"
+            decision_summary = (
+                f"Vendor {run.draft_po.vendor_name} direkomendasikan; biaya tanpa tindakan "
+                f"${run.cost_of_inaction:,.0f}. Draf PO menunggu persetujuan manusia."
+                if is_indonesian
+                else (
+                    f"Vendor {run.draft_po.vendor_name} is recommended; cost of inaction is "
+                    f"${run.cost_of_inaction:,.0f}. The draft PO awaits human approval."
+                )
             )
+            if is_indonesian:
+                recommendation = (
+                    f"Rekomendasi: beli dari {run.draft_po.vendor_name} seharga "
+                    f"${run.draft_po.total_price:,.0f} (sumber: SAP Ariba)."
+                )
+                body = (
+                    f"Bahan baku {run.event.component_name} terlambat "
+                    f"{run.event.delay_days:g} hari. {source_text} "
+                    f"(sumber: SAP S/4HANA). {recommendation}\n"
+                    f"Ringkasan keputusan: {decision_summary}"
+                )
+            else:
+                recommendation = (
+                    f"Recommendation: buy from {run.draft_po.vendor_name} at "
+                    f"${run.draft_po.total_price:,.0f} (source: SAP Ariba)."
+                )
+                body = (
+                    f"Raw material {run.event.component_name} delayed "
+                    f"{run.event.delay_days:g} days. {source_text} "
+                    f"(source: SAP S/4HANA). {recommendation}\n"
+                    f"Decision summary: {decision_summary}"
+                )
         elif event_kind == "approval_overdue":
-            subject = f"Approval overdue: {run.event.component_name}"
+            subject = (
+                f"Persetujuan terlambat: {run.event.component_name}"
+                if is_indonesian
+                else f"Approval overdue: {run.event.component_name}"
+            )
             body = (
-                f"Human approval is overdue for {run.draft_po.vendor_name}'s "
-                f"${run.draft_po.total_price:,.0f} draft purchase order."
+                f"Persetujuan manusia untuk draf purchase order {run.draft_po.vendor_name} "
+                f"senilai ${run.draft_po.total_price:,.0f} telah melewati batas waktu."
+                if is_indonesian
+                else (
+                    f"Human approval is overdue for {run.draft_po.vendor_name}'s "
+                    f"${run.draft_po.total_price:,.0f} draft purchase order."
+                )
             )
         elif event_kind == "tracking_deviation":
-            subject = f"Shipment ETA deviation: {run.event.component_name}"
+            subject = (
+                f"Penyimpangan ETA pengiriman: {run.event.component_name}"
+                if is_indonesian
+                else f"Shipment ETA deviation: {run.event.component_name}"
+            )
             body = (
                 run.execution_tracking.alert
                 if run.execution_tracking and run.execution_tracking.alert
-                else "The supplier ETA differs from the quoted lead time."
+                else (
+                    "ETA pemasok berbeda dari waktu pengiriman yang ditawarkan."
+                    if is_indonesian
+                    else "The supplier ETA differs from the quoted lead time."
+                )
             )
         else:
             raise ValueError(f"Unsupported notification event: {event_kind}")
@@ -76,14 +123,17 @@ class NotificationService:
         )
         approve_url = f"{self._dashboard_url}/?approve={approve_token}"
         view_url = f"{self._api_base_url}/notifications/links/{view_token}"
+        approval_action = (
+            "Setujui (membuka tinjauan eksplisit; tidak langsung mengeksekusi)"
+            if is_indonesian
+            else "Approve (opens an explicit review; never executes directly)"
+        )
+        view_action = "Lihat detail" if is_indonesian else "View details"
         message = NotificationMessage(
             run_id=run.run_id,
             event_kind=event_kind,
             subject=subject,
-            text=(
-                f"{body}\nApprove (opens an explicit review; never executes directly): "
-                f"{approve_url}\nView details: {view_url}"
-            ),
+            text=(f"{body}\n{approval_action}: {approve_url}\n{view_action}: {view_url}"),
             approve_url=approve_url,
             view_url=view_url,
         )

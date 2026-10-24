@@ -22,6 +22,8 @@ const vendorEvaluations: VendorEvaluation[] = [
       currency: "USD",
       risk_score: 78,
       capacity: 6000,
+      region: "East Java",
+      distance_km: 650,
     },
     feasible: true,
     action_cost: 120000,
@@ -39,6 +41,8 @@ const vendorEvaluations: VendorEvaluation[] = [
       currency: "USD",
       risk_score: 88,
       capacity: 6000,
+      region: "West Java",
+      distance_km: 125,
     },
     feasible: true,
     action_cost: 135000,
@@ -104,9 +108,11 @@ describe("dashboard visual components", () => {
   it("shows SAP inventory impact and derives coverage and stockout risk", () => {
     render(
       <ImpactPanel
+        language="en"
         run={{
           ...pendingRun,
           inventory_snapshot: {
+            component_name: "Microchip X",
             current_stock: 3000,
             daily_consumption: 1000,
             line_stoppage_cost_per_day: 5000,
@@ -123,9 +129,44 @@ describe("dashboard visual components", () => {
     expect(screen.getByText(/source: SAP S\/4HANA/)).toBeInTheDocument();
   });
 
+  it("lists each affected BOM component and marks the critical material", () => {
+    render(
+      <ImpactPanel
+        language="en"
+        run={{
+          ...pendingRun,
+          material_impacts: [
+            {
+              component_id: "microchip-x",
+              component_name: "Microchip X",
+              coverage_days: 3,
+              stockout_days: 2,
+              cost_of_inaction: 200_000,
+              critical: false,
+            },
+            {
+              component_id: "sensor-y",
+              component_name: "Sensor Y",
+              coverage_days: 1,
+              stockout_days: 4,
+              cost_of_inaction: 1_000_000,
+              critical: true,
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "BOM component impact" })).toBeInTheDocument();
+    expect(screen.getByText("Sensor Y")).toBeInTheDocument();
+    expect(screen.getByText("Critical")).toBeInTheDocument();
+    expect(screen.getByText("$1,000,000")).toBeInTheDocument();
+  });
+
   it("renders supplier source and comparison charts", () => {
     render(
       <VendorCharts
+        language="en"
         evaluations={vendorEvaluations}
         selectedVendorId="vendor-b"
         costOfInaction={200000}
@@ -159,6 +200,7 @@ describe("dashboard visual components", () => {
   it("renders audit entries and the KPI summary", () => {
     render(
       <AuditViewer
+        language="en"
         run={{
           ...pendingRun,
           audit_log: [
@@ -177,7 +219,7 @@ describe("dashboard visual components", () => {
     expect(screen.getByText("Selected Vendor B.")).toBeInTheDocument();
     expect(screen.getByText("Lowest total economic cost.")).toBeInTheDocument();
 
-    render(<KpiCards report={report} />);
+    render(<KpiCards language="en" report={report} />);
     expect(screen.getByText("Response KPIs")).toBeInTheDocument();
     expect(screen.getByText("Illustrative savings")).toBeInTheDocument();
     expect(screen.getByText("$115,000")).toBeInTheDocument();
@@ -186,7 +228,7 @@ describe("dashboard visual components", () => {
   });
 
   it("renders tenant usage and explicitly separates onboarding from monthly charges", () => {
-    render(<UsageCard report={usage} />);
+    render(<UsageCard language="en" report={usage} />);
 
     expect(screen.getByText("Usage & Plan")).toBeInTheDocument();
     expect(screen.getByText("Usage month")).toBeInTheDocument();

@@ -42,5 +42,11 @@ def test_procurement_economic_comparison_selects_vendor_b() -> None:
 
     assert len(result.evaluations) == 4
     assert selected.vendor.vendor_id == "vendor-b"
+    assert result.evaluations[0].vendor.vendor_id == "vendor-b"
+    assert result.evaluations[0].same_region is True
+    vendor_d = next(item for item in result.evaluations if item.vendor.vendor_id == "vendor-d")
+    assert vendor_d.capacity_sufficient is True
+    assert vendor_d.meets_deadline is False
+    assert vendor_d.feasible is False
     assert selected.risk_adjusted_total < logistics.cost_of_inaction
     assert result.reasoning

@@ -23,6 +23,8 @@ export interface VendorEvaluation {
     currency: string;
     risk_score: number;
     capacity: number;
+    region: string;
+    distance_km: number;
   };
   feasible: boolean;
   action_cost: number;
@@ -60,10 +62,19 @@ export interface DisruptionRun {
   };
   stages: Stage[];
   vendor_comparison: VendorEvaluation[];
+  material_impacts: {
+    component_id: string;
+    component_name: string;
+    coverage_days: number;
+    stockout_days: number;
+    cost_of_inaction: number;
+    critical: boolean;
+  }[];
   trace_steps: { source: string; text: string }[];
   selected_vendor_id: string | null;
   chain_of_thought: string[];
   inventory_snapshot: {
+    component_name: string;
     current_stock: number;
     daily_consumption: number;
     line_stoppage_cost_per_day: number;

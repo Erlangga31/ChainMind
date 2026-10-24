@@ -105,6 +105,29 @@ def test_all_disruption_scenarios_keep_vendor_b_approval_and_tracking_flow(
     assert completed.stages[-1].status == "COMPLETED"
 
 
+def test_logistics_selects_the_critical_material_from_multiple_affected_components() -> None:
+    pipeline = create_pipeline(Settings(mode="mock"), EventStore())
+    event = seeded_event().model_copy(
+        update={
+            "event_id": uuid4(),
+            "affected_component_ids": ["microchip-x", "sensor-y"],
+        }
+    )
+
+    run = pipeline.run(event)
+
+    assert {impact.component_id for impact in run.material_impacts} == {
+        "microchip-x",
+        "sensor-y",
+    }
+    critical = next(impact for impact in run.material_impacts if impact.critical)
+    assert critical.component_id == "sensor-y"
+    assert run.inventory_snapshot is not None
+    assert run.inventory_snapshot.component_id == "sensor-y"
+    assert run.draft_po is not None
+    assert run.draft_po.component_id == "sensor-y"
+
+
 def test_revision_replaces_draft_and_still_requires_approval() -> None:
     pipeline = create_pipeline(Settings(mode="mock"), EventStore())
     run = pipeline.run(seeded_event())

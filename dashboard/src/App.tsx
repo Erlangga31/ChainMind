@@ -9,6 +9,7 @@ import {
   WorkflowTimeline,
 } from "./components";
 import type { ApiError, DisruptionRun, KPIReport, UsageReport } from "./types";
+import { formatNotification, translate, type Language } from "./i18n";
 
 const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 const OIDC_ISSUER = import.meta.env.VITE_OIDC_ISSUER ?? "http://127.0.0.1:8100";
@@ -17,7 +18,7 @@ const OIDC_REDIRECT_URI = import.meta.env.VITE_OIDC_REDIRECT_URI ?? "http://loca
 const SCENARIOS = [
   {
     id: "weather",
-    label: "Extreme weather",
+    label: "weather",
     title: "Extreme weather delays cargo ship",
     description: "Severe weather delayed the vessel carrying Microchip X by five days.",
     event_type: "weather",
@@ -25,7 +26,7 @@ const SCENARIOS = [
   },
   {
     id: "geopolitical",
-    label: "Geopolitical disruption",
+    label: "geopolitical",
     title: "Geopolitical disruption delays component supply",
     description: "Regional restrictions delayed the shipment of Microchip X.",
     event_type: "geopolitical",
@@ -33,7 +34,7 @@ const SCENARIOS = [
   },
   {
     id: "vendor_failure",
-    label: "Vendor failure",
+    label: "vendorFailure",
     title: "Primary vendor reports a supply failure",
     description: "The contracted supplier cannot fulfill the Microchip X shipment.",
     event_type: "vendor_failure",
@@ -41,7 +42,7 @@ const SCENARIOS = [
   },
   {
     id: "port_congestion",
-    label: "Port congestion",
+    label: "portCongestion",
     title: "Port congestion delays inbound shipment",
     description: "Port congestion delayed the Microchip X shipment by five days.",
     event_type: "logistics_delay",
@@ -64,6 +65,70 @@ type AuthSession = {
   role: "viewer" | "approver" | "admin";
   expiresAt: number;
 };
+
+function LanguageControls({
+  language,
+  onChange,
+}: {
+  language: Language;
+  onChange: (language: Language) => void;
+}) {
+  return (
+    <div role="group" aria-label={translate(language, "language")} className="flex gap-1">
+      <button
+        type="button"
+        aria-pressed={language === "id"}
+        className="rounded-md border border-slate-400 px-2 py-1 text-xs font-semibold"
+        onClick={() => onChange("id")}
+      >
+        ID
+      </button>
+      <button
+        type="button"
+        aria-pressed={language === "en"}
+        className="rounded-md border border-slate-400 px-2 py-1 text-xs font-semibold"
+        onClick={() => onChange("en")}
+      >
+        EN
+      </button>
+    </div>
+  );
+}
+
+function AccessibilityControls({
+  largeText,
+  highContrast,
+  onLargeTextChange,
+  onHighContrastChange,
+  language,
+}: {
+  largeText: boolean;
+  highContrast: boolean;
+  onLargeTextChange: (enabled: boolean) => void;
+  onHighContrastChange: (enabled: boolean) => void;
+  language: Language;
+}) {
+  return (
+    <div className="flex gap-2">
+      <button
+        type="button"
+        aria-pressed={largeText}
+        onClick={() => onLargeTextChange(!largeText)}
+        className="rounded-md border border-slate-400 px-2 py-1 text-xs font-semibold"
+      >
+        {translate(language, "largeText")}
+      </button>
+      <button
+        type="button"
+        aria-pressed={highContrast}
+        onClick={() => onHighContrastChange(!highContrast)}
+        className="rounded-md border border-slate-400 px-2 py-1 text-xs font-semibold"
+      >
+        {translate(language, "highContrast")}
+      </button>
+    </div>
+  );
+}
 
 let accessToken: string | null = null;
 let onSessionExpired: (() => void) | null = null;
@@ -155,6 +220,15 @@ function StatusPill({ status }: { status: string }) {
 }
 
 export default function App() {
+  const [language, setLanguage] = useState<Language>(
+    () => (localStorage.getItem("chainmind.language") === "en" ? "en" : "id"),
+  );
+  const [largeText, setLargeText] = useState(
+    () => localStorage.getItem("chainmind.largeText") === "true",
+  );
+  const [highContrast, setHighContrast] = useState(
+    () => localStorage.getItem("chainmind.highContrast") === "true",
+  );
   const [session, setSession] = useState<AuthSession | null>(null);
   const [runs, setRuns] = useState<DisruptionRun[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -173,6 +247,20 @@ export default function App() {
   const [notificationToken, setNotificationToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const t = (key: string) => translate(language, key);
+
+  useEffect(() => {
+    localStorage.setItem("chainmind.language", language);
+    document.documentElement.lang = language;
+  }, [language]);
+  useEffect(() => {
+    localStorage.setItem("chainmind.largeText", String(largeText));
+    document.documentElement.dataset.fontScale = largeText ? "large" : "normal";
+  }, [largeText]);
+  useEffect(() => {
+    localStorage.setItem("chainmind.highContrast", String(highContrast));
+    document.documentElement.dataset.contrast = highContrast ? "high" : "standard";
+  }, [highContrast]);
 
   onSessionExpired = () => {
     accessToken = null;
@@ -349,6 +437,7 @@ export default function App() {
           description: scenario.description,
           event_type: scenario.event_type,
           delay_days: scenario.delay_days,
+          language,
           component_id: "microchip-x",
           component_name: "Microchip X",
           source: "dashboard-demo",
@@ -446,9 +535,21 @@ export default function App() {
       <main className="grid min-h-screen place-items-center bg-canvas p-6">
         <section className="w-full max-w-md rounded-3xl bg-white p-8 shadow-card">
           <p className="text-sm font-semibold uppercase tracking-widest text-accent">ChainMind SSO</p>
-          <h1 className="mt-2 text-2xl font-bold text-ink">Sign in to the control tower</h1>
+          <div className="flex items-center justify-between gap-3">
+            <h1 className="mt-2 text-2xl font-bold text-ink">{t("signInTitle")}</h1>
+            <div className="flex flex-wrap justify-end gap-2">
+              <LanguageControls language={language} onChange={setLanguage} />
+              <AccessibilityControls
+                largeText={largeText}
+                highContrast={highContrast}
+                onLargeTextChange={setLargeText}
+                onHighContrastChange={setHighContrast}
+                language={language}
+              />
+            </div>
+          </div>
           <p className="mt-3 text-sm leading-6 text-slate-600">
-            Authenticate through the configured OIDC identity provider. Approval actions require the approver role.
+            {t("signInDescription")}
           </p>
           {error && <p role="alert" className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
           <button
@@ -457,7 +558,7 @@ export default function App() {
               setError(caught instanceof Error ? caught.message : "Could not start sign-in.");
             })}
           >
-            Sign in with ChainMind SSO
+            {t("signIn")}
           </button>
         </section>
       </main>
@@ -467,17 +568,25 @@ export default function App() {
   return (
     <div className="min-h-screen bg-canvas">
       <header className="bg-ink text-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 lg:px-8">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between lg:px-8">
           <div className="flex items-center gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-xl bg-teal-400 text-lg font-black text-ink">C</span>
             <div>
               <p className="font-bold tracking-wide">CHAINMIND</p>
-              <p className="text-xs text-slate-300">Autonomous Disruption Resolver</p>
+              <p className="text-xs text-slate-300">{t("brandSubtitle")}</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-wrap items-center justify-center gap-2 sm:justify-end">
             <span className="text-xs text-slate-300">{session.subject} · {role}</span>
-            <button className="rounded-lg border border-slate-500 px-3 py-1 text-xs text-white" onClick={logout}>Logout</button>
+            <LanguageControls language={language} onChange={setLanguage} />
+            <AccessibilityControls
+              largeText={largeText}
+              highContrast={highContrast}
+              onLargeTextChange={setLargeText}
+              onHighContrastChange={setHighContrast}
+              language={language}
+            />
+            <button className="rounded-lg border border-slate-500 px-3 py-1 text-xs text-white" onClick={logout}>{t("logout")}</button>
             <span className="rounded-full border border-teal-300/40 px-3 py-1 text-xs font-semibold text-teal-200">
               {apiMode === "mock" ? "MOCK MODE" : `${apiMode.toUpperCase()} MODE`}
             </span>
@@ -488,23 +597,22 @@ export default function App() {
       <main className="mx-auto max-w-7xl space-y-6 px-5 py-8 lg:px-8">
         <section className="flex flex-col justify-between gap-5 rounded-3xl bg-white p-6 shadow-card md:flex-row md:items-center md:p-8">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-widest text-accent">Manufacturing control tower</p>
-            <h1 className="mt-2 text-3xl font-bold text-ink">Disruption response</h1>
+            <p className="text-sm font-semibold uppercase tracking-widest text-accent">{t("controlTower")}</p>
+            <h1 className="mt-2 text-3xl font-bold text-ink">{t("responseTitle")}</h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-              Monitor stock risk, compare alternative suppliers, and prepare a purchase order.
-              Financial action remains blocked until a human approves.
+              {t("responseDescription")}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <label className="text-sm font-medium text-slate-700">
-              Scenario
+              {t("scenario")}
               <select
                 aria-label="Disruption scenario"
                 className="ml-2 rounded-lg border border-slate-300 px-3 py-2"
                 value={scenarioId}
                 onChange={(event) => setScenarioId(event.target.value as typeof scenarioId)}
               >
-                {SCENARIOS.map((scenario) => <option key={scenario.id} value={scenario.id}>{scenario.label}</option>)}
+                {SCENARIOS.map((scenario) => <option key={scenario.id} value={scenario.id}>{t(scenario.label)}</option>)}
               </select>
             </label>
             <button
@@ -512,17 +620,17 @@ export default function App() {
               disabled={busy}
               onClick={() => void triggerDemo()}
             >
-              {busy ? "Working…" : "Trigger demo disruption"}
+              {busy ? t("working") : t("trigger")}
             </button>
           </div>
         </section>
 
         {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div>}
 
-        <section aria-label="Notification feed" className="rounded-2xl bg-white p-5 shadow-card">
-          <h2 className="text-lg font-bold text-ink">Notification feed</h2>
+        <section aria-label={t("notificationFeed")} className="rounded-2xl bg-white p-5 shadow-card">
+          <h2 className="text-lg font-bold text-ink">{t("notificationFeed")}</h2>
           {pendingNotifications.length === 0 ? (
-            <p className="mt-2 text-sm text-slate-500">No pending approval notifications.</p>
+            <p className="mt-2 text-sm text-slate-500">{t("noNotifications")}</p>
           ) : (
             <ul className="mt-3 space-y-3">
               {pendingNotifications.map((item) => {
@@ -533,10 +641,14 @@ export default function App() {
                 return (
                   <li key={item.run_id} className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-200 p-4">
                     <p className="min-w-60 flex-1 text-sm leading-6 text-slate-700">
-                      Raw material {item.event.component_name} delayed {item.event.delay_days} days.
-                      {" "}Stock for {coverageDays.toLocaleString("en-US", { maximumFractionDigits: 1 })} days
-                      {" "}(source: SAP S/4HANA). Recommendation: buy from {item.draft_po?.vendor_name}
-                      {" "}at {money(item.draft_po?.total_price ?? 0)} (source: SAP Ariba).
+                      {formatNotification(
+                        language,
+                        item.inventory_snapshot?.component_name ?? item.event.component_name,
+                        item.event.delay_days,
+                        coverageDays,
+                        item.draft_po?.vendor_name ?? "—",
+                        money(item.draft_po?.total_price ?? 0),
+                      )}
                     </p>
                     <div className="flex gap-2">
                       <button
@@ -544,13 +656,13 @@ export default function App() {
                         disabled={busy || !canApprove}
                         onClick={() => void openNotificationApproval(item.run_id)}
                       >
-                        Approve
+                        {t("approve")}
                       </button>
                       <button
                         className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
                         onClick={() => void selectRun(item.run_id)}
                       >
-                        View details
+                        {t("viewDetails")}
                       </button>
                     </div>
                   </li>
@@ -560,27 +672,27 @@ export default function App() {
           )}
         </section>
 
-        <nav className="flex gap-2" aria-label="Dashboard sections">
-          <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "runs" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("runs")}>Disruptions</button>
-          <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "kpis" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("kpis")}>KPIs</button>
+        <nav className="flex flex-wrap gap-2" aria-label={t("dashboardSections")}>
+          <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "runs" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("runs")}>{t("disruptions")}</button>
+          <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "kpis" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("kpis")}>{t("kpis")}</button>
           {canApprove && (
-            <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "usage" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("usage")}>Usage &amp; Plan</button>
+            <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "usage" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("usage")}>{t("usagePlan")}</button>
           )}
         </nav>
 
         {page === "kpis" ? (
-          kpis ? <KpiCards report={kpis} /> : <div className="rounded-xl bg-white p-6 text-slate-500">Loading KPI data…</div>
+          kpis ? <KpiCards report={kpis} language={language} /> : <div className="rounded-xl bg-white p-6 text-slate-500">{language === "id" ? "Memuat data KPI…" : "Loading KPI data…"}</div>
         ) : page === "usage" ? (
-          usage ? <UsageCard report={usage} /> : <div className="rounded-xl bg-white p-6 text-slate-500">Loading usage data…</div>
+          usage ? <UsageCard report={usage} language={language} /> : <div className="rounded-xl bg-white p-6 text-slate-500">{language === "id" ? "Memuat data penggunaan…" : "Loading usage data…"}</div>
         ) : (
-        <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
+        <div className="grid min-w-0 gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
           <aside className="h-fit rounded-2xl bg-white p-4 shadow-card">
             <div className="mb-3 flex items-center justify-between px-2">
-              <h2 className="font-bold text-ink">Disruption runs</h2>
-              <button className="text-xs font-semibold text-accent hover:underline" onClick={() => void refreshRuns()}>Refresh</button>
+              <h2 className="font-bold text-ink">{t("disruptionRuns")}</h2>
+              <button className="text-xs font-semibold text-accent hover:underline" onClick={() => void refreshRuns()}>{t("refresh")}</button>
             </div>
             {runs.length === 0 ? (
-              <p className="px-2 py-6 text-sm text-slate-500">No runs yet. Trigger the demo to begin.</p>
+              <p className="px-2 py-6 text-sm text-slate-500">{t("noRuns")}</p>
             ) : (
               <ul className="space-y-2">
                 {runs.map((item) => (
@@ -590,7 +702,7 @@ export default function App() {
                       onClick={() => void selectRun(item.run_id)}
                     >
                       <span className="block truncate text-sm font-semibold text-ink">{item.event.component_name}</span>
-                      <span className="mt-1 block text-xs text-slate-500">{item.event.delay_days} day delay · {item.severity ?? "Unclassified"}</span>
+                      <span className="mt-1 block text-xs text-slate-500">{item.event.delay_days} {language === "id" ? "hari keterlambatan" : "day delay"} · {item.severity ?? t("unclassified")}</span>
                       <span className="mt-2 block"><StatusPill status={item.status} /></span>
                     </button>
                   </li>
@@ -600,49 +712,50 @@ export default function App() {
           </aside>
 
           {run ? (
-            <div className="space-y-6">
+            <div className="min-w-0 space-y-6">
               <section className="rounded-2xl bg-white p-5 shadow-card md:p-6">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm text-slate-500">Active event · {run.event.component_name}</p>
+                    <p className="text-sm text-slate-500">{t("activeEvent")} · {run.inventory_snapshot?.component_name ?? run.event.component_name}</p>
                     <h2 className="mt-1 text-xl font-bold text-ink">{run.event.title}</h2>
-                    <p className="mt-1 text-sm text-slate-600">{run.event.delay_days}-day delay · Severity {run.severity ?? "—"}</p>
+                    <p className="mt-1 text-sm text-slate-600">{run.event.delay_days} {t("delay")} · {t("severity")} {run.severity ?? "—"}</p>
                   </div>
                   <StatusPill status={run.status} />
                 </div>
-                <div className="mt-6"><WorkflowTimeline run={run} /></div>
+                <div className="mt-6"><WorkflowTimeline run={run} language={language} /></div>
               </section>
 
-              <ImpactPanel run={run} />
+              <ImpactPanel run={run} language={language} />
               <VendorCharts
                 evaluations={run.vendor_comparison}
                 selectedVendorId={run.selected_vendor_id}
                 costOfInaction={run.cost_of_inaction}
+                language={language}
               />
 
               {run.execution_tracking && (
                 <section className="rounded-2xl bg-white p-5 shadow-card md:p-6">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm text-slate-500">Post-approval operations</p>
-                      <h2 className="text-lg font-bold text-ink">Execution & tracking</h2>
+                      <p className="text-sm text-slate-500">{t("postApproval")}</p>
+                      <h2 className="text-lg font-bold text-ink">{t("executionTracking")}</h2>
                     </div>
                     <StatusPill status={run.execution_tracking.shipment.status} />
                   </div>
                   <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">Supplier confirmation<strong className="mt-1 block text-ink">{run.execution_tracking.confirmation.confirmation_status} · {run.execution_tracking.confirmation.confirmed_quantity.toLocaleString()} pcs</strong></p>
-                    <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">ASN / ETA<strong className="mt-1 block text-ink">{run.execution_tracking.shipment.tracking_id} · {run.execution_tracking.shipment.estimated_arrival}</strong></p>
-                    <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">Projected stock<strong className="mt-1 block text-ink">{run.execution_tracking.inventory_projection.projected_stock_at_arrival.toLocaleString()} pcs · {run.execution_tracking.inventory_projection.projected_coverage_days} days</strong></p>
-                    <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">Line stoppage<strong className="mt-1 block text-ink">{run.execution_tracking.line_stoppage_avoided ? "Avoided (simulated)" : "Not avoided"}</strong></p>
+                    <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">{t("supplierConfirmation")}<strong className="mt-1 block text-ink">{run.execution_tracking.confirmation.confirmation_status} · {run.execution_tracking.confirmation.confirmed_quantity.toLocaleString()} pcs</strong></p>
+                    <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">{t("asnEta")}<strong className="mt-1 block text-ink">{run.execution_tracking.shipment.tracking_id} · {run.execution_tracking.shipment.estimated_arrival}</strong></p>
+                    <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">{t("projectedStock")}<strong className="mt-1 block text-ink">{run.execution_tracking.inventory_projection.projected_stock_at_arrival.toLocaleString()} pcs · {run.execution_tracking.inventory_projection.projected_coverage_days} {language === "id" ? "hari" : "days"}</strong></p>
+                    <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">{t("lineStoppage")}<strong className="mt-1 block text-ink">{run.execution_tracking.line_stoppage_avoided ? t("avoidedSimulated") : t("notAvoided")}</strong></p>
                   </div>
                   {run.execution_tracking.alert && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{run.execution_tracking.alert}</p>}
                   {run.kpis && (
                     <div className="mt-4 border-t border-slate-100 pt-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Illustrative per-run KPI · not a forecast</p>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t("illustrativePerRun")}</p>
                       <div className="mt-2 grid gap-3 sm:grid-cols-3">
-                        <p className="text-sm text-slate-500">Cost of inaction<strong className="block text-ink">{money(run.kpis.cost_of_inaction)}</strong></p>
-                        <p className="text-sm text-slate-500">Action cost<strong className="block text-ink">{money(run.kpis.action_cost)}</strong></p>
-                        <p className="text-sm text-slate-500">Illustrative savings<strong className="block text-ink">{money(run.kpis.illustrative_savings)}</strong></p>
+                        <p className="text-sm text-slate-500">{t("costOfInaction")}<strong className="block text-ink">{money(run.kpis.cost_of_inaction)}</strong></p>
+                        <p className="text-sm text-slate-500">{t("actionCost")}<strong className="block text-ink">{money(run.kpis.action_cost)}</strong></p>
+                        <p className="text-sm text-slate-500">{t("illustrativeSavings")}<strong className="block text-ink">{money(run.kpis.illustrative_savings)}</strong></p>
                       </div>
                     </div>
                   )}
@@ -651,19 +764,20 @@ export default function App() {
 
               <section className="rounded-2xl bg-white p-5 shadow-card md:p-6">
                 <div className="mb-4 flex items-end justify-between gap-3">
-                  <div><p className="text-sm text-slate-500">SAP Ariba Network</p><h2 className="text-lg font-bold text-ink">Vendor comparison</h2></div>
-                  <span className="text-xs text-slate-500">{feasibleVendors.length} feasible</span>
+                <div><p className="text-sm text-slate-500">{t("aribaNetwork")}</p><h2 className="text-lg font-bold text-ink">{t("vendorComparison")}</h2></div>
+                <span className="text-xs text-slate-500">{feasibleVendors.length} {t("feasible")}</span>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[700px] text-left text-sm">
                     <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-                      <tr><th className="px-3 py-3">Vendor</th><th className="px-3 py-3">Lead</th><th className="px-3 py-3">Capacity</th><th className="px-3 py-3">Quote</th><th className="px-3 py-3">Risk score</th><th className="px-3 py-3">Residual loss</th><th className="px-3 py-3">Economic total</th><th className="px-3 py-3">Status</th></tr>
+                      <tr><th className="px-3 py-3">{t("vendor")}</th><th className="px-3 py-3">{t("regionDistance")}</th><th className="px-3 py-3">{t("lead")}</th><th className="px-3 py-3">{t("capacity")}</th><th className="px-3 py-3">{t("quote")}</th><th className="px-3 py-3">{t("riskScore")}</th><th className="px-3 py-3">{t("residualLoss")}</th><th className="px-3 py-3">{t("economicTotal")}</th><th className="px-3 py-3">{t("status")}</th></tr>
                     </thead>
                     <tbody>
                       {run.vendor_comparison.map((evaluation) => (
                         <tr className={`border-b border-slate-100 ${evaluation.vendor.vendor_id === run.selected_vendor_id ? "bg-teal-50/70" : ""}`} key={evaluation.vendor.vendor_id}>
-                          <td className="px-3 py-3 font-semibold">{evaluation.vendor.vendor_name}{evaluation.vendor.vendor_id === run.selected_vendor_id && <span className="ml-2 text-xs text-accent">Recommended</span>}</td>
-                          <td className="px-3 py-3">{evaluation.vendor.lead_time_days} days</td>
+                          <td className="px-3 py-3 font-semibold">{evaluation.vendor.vendor_name}{evaluation.vendor.vendor_id === run.selected_vendor_id && <span className="ml-2 text-xs text-accent">{t("recommended")}</span>}</td>
+                          <td className="px-3 py-3">{evaluation.vendor.region} · {evaluation.vendor.distance_km.toLocaleString()} km</td>
+                          <td className="px-3 py-3">{evaluation.vendor.lead_time_days} {language === "id" ? "hari" : "days"}</td>
                           <td className="px-3 py-3">{evaluation.vendor.capacity.toLocaleString()} pcs</td>
                           <td className="px-3 py-3">{money(evaluation.action_cost)}</td>
                           <td className="px-3 py-3">{evaluation.vendor.risk_score}/100</td>
@@ -678,54 +792,54 @@ export default function App() {
               </section>
 
               <div className="grid gap-6 xl:grid-cols-2">
-                <AgentReasoning run={run} />
+                <AgentReasoning run={run} language={language} />
 
                 <section className="rounded-2xl bg-white p-5 shadow-card md:p-6">
                   <p className="text-sm text-slate-500">
-                    SAP S/4HANA · {run.draft_po?.status === "PENDING_APPROVAL" ? "draft for approval" : "purchase order"}
+                    SAP S/4HANA · {run.draft_po?.status === "PENDING_APPROVAL" ? t("draftForApproval") : t("purchaseOrder")}
                   </p>
-                  <h2 className="text-lg font-bold text-ink">Purchase order</h2>
+                  <h2 className="text-lg font-bold text-ink">{t("purchaseOrder")}</h2>
                   {run.draft_po ? (
                     <>
                       <div className="mt-4 rounded-xl bg-slate-50 p-4">
                         <div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-ink">{run.draft_po.component_name}</p><p className="text-sm text-slate-500">{run.draft_po.vendor_name}</p></div><StatusPill status={run.draft_po.status} /></div>
                         <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                          <p className="text-slate-500">Quantity <strong className="block text-ink">{run.draft_po.quantity.toLocaleString()} pcs</strong></p>
-                          <p className="text-slate-500">Unit price <strong className="block text-ink">{money(run.draft_po.unit_price)}</strong></p>
-                          <p className="text-slate-500">Total <strong className="block text-ink">{money(run.draft_po.total_price)}</strong></p>
-                          <p className="text-slate-500">Terms <strong className="block text-ink">{run.draft_po.terms}</strong></p>
-                          {run.draft_po.sap_reference && <p className="col-span-2 text-slate-500">SAP reference <strong className="block text-ink">{run.draft_po.sap_reference}</strong></p>}
+                          <p className="text-slate-500">{t("quantity")} <strong className="block text-ink">{run.draft_po.quantity.toLocaleString()} pcs</strong></p>
+                          <p className="text-slate-500">{t("unitPrice")} <strong className="block text-ink">{money(run.draft_po.unit_price)}</strong></p>
+                          <p className="text-slate-500">{t("total")} <strong className="block text-ink">{money(run.draft_po.total_price)}</strong></p>
+                          <p className="text-slate-500">{t("terms")} <strong className="block text-ink">{run.draft_po.terms}</strong></p>
+                          {run.draft_po.sap_reference && <p className="col-span-2 text-slate-500">{t("sapReference")} <strong className="block text-ink">{run.draft_po.sap_reference}</strong></p>}
                         </div>
                       </div>
                       {pending && canApprove && (
                         <div className="mt-4 space-y-3">
-                          <label className="block text-sm font-medium text-slate-700">Decision note
-                            <input className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" value={decisionNote} onChange={(event) => setDecisionNote(event.target.value)} placeholder="Optional note for the audit record" />
+                          <label className="block text-sm font-medium text-slate-700">{t("decisionNote")}
+                            <input className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" value={decisionNote} onChange={(event) => setDecisionNote(event.target.value)} placeholder={t("optionalAuditNote")} />
                           </label>
                           <label className="block text-sm font-medium text-slate-700">Vendor for revision
                             <select className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" value={revisionVendorId} onChange={(event) => setRevisionVendorId(event.target.value)}>
-                              <option value="">Select a feasible vendor</option>
+                              <option value="">{t("selectFeasibleVendor")}</option>
                               {feasibleVendors.map((evaluation) => <option key={evaluation.vendor.vendor_id} value={evaluation.vendor.vendor_id}>{evaluation.vendor.vendor_name} · {money(evaluation.risk_adjusted_total)}</option>)}
                             </select>
                           </label>
                           <div className="flex flex-wrap gap-2 pt-1">
-                            <button className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={busy} onClick={() => void decide("approve")}>Review approval</button>
-                            <button className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50" disabled={busy || !revisionVendorId} onClick={() => void decide("revise")}>Revise vendor</button>
-                            <button className="rounded-lg border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 disabled:opacity-50" disabled={busy} onClick={() => void decide("reject")}>Reject</button>
+                            <button className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={busy} onClick={() => void decide("approve")}>{t("reviewApproval")}</button>
+                            <button className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50" disabled={busy || !revisionVendorId} onClick={() => void decide("revise")}>{t("reviseVendor")}</button>
+                            <button className="rounded-lg border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 disabled:opacity-50" disabled={busy} onClick={() => void decide("reject")}>{t("reject")}</button>
                           </div>
-                          <p className="text-xs leading-5 text-slate-500">Approve executes the PO in the configured SAP adapter. Reject and revise do not execute a purchase.</p>
+                          <p className="text-xs leading-5 text-slate-500">{t("approvalInstructions")}</p>
                         </div>
                       )}
-                      {pending && !canApprove && <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Viewer access is read-only. Sign in with an approver account to submit a decision.</p>}
+                      {pending && !canApprove && <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{t("viewerDecisionHelp")}</p>}
                     </>
-                  ) : <p className="mt-4 text-sm text-slate-500">No purchase order was created for this run.</p>}
+                  ) : <p className="mt-4 text-sm text-slate-500">{t("noPurchaseOrder")}</p>}
                 </section>
               </div>
-              <AuditViewer run={run} />
+              <AuditViewer run={run} language={language} />
             </div>
           ) : (
             <section className="grid min-h-64 place-items-center rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
-              <div><p className="text-lg font-semibold text-ink">No disruption selected</p><p className="mt-2 text-sm text-slate-500">Trigger the demo disruption to run the six-stage analysis.</p></div>
+              <div><p className="text-lg font-semibold text-ink">{t("noDisruptionSelected")}</p><p className="mt-2 text-sm text-slate-500">{t("triggerToAnalyze")}</p></div>
             </section>
           )}
         </div>
@@ -734,20 +848,20 @@ export default function App() {
       {pendingDecision && (
         <div className="fixed inset-0 z-20 grid place-items-center bg-ink/60 p-4" role="presentation">
           <section role="dialog" aria-modal="true" aria-labelledby="decision-title" className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
-            <h2 id="decision-title" className="text-xl font-bold text-ink">Confirm {pendingDecision}</h2>
+            <h2 id="decision-title" className="text-xl font-bold text-ink">{t("decisionConfirmation")}: {t(pendingDecision)}</h2>
             <p className="mt-2 text-sm text-slate-600">
               {pendingDecision === "approve"
-                ? "This authorizes the pending purchase order to be executed by the configured SAP adapter."
-                : "This decision will be recorded in the run audit log."}
+                ? t("approveConfirmation")
+                : t("decisionRecorded")}
             </p>
             <label className="mt-4 flex items-start gap-3 text-sm text-slate-700">
               <input type="checkbox" checked={decisionConfirmed} onChange={(event) => setDecisionConfirmed(event.target.checked)} />
-              I explicitly confirm this human decision.
+              {t("confirmCheckbox")}
             </label>
             <div className="mt-5 flex justify-end gap-2">
-              <button className="rounded-lg border border-slate-300 px-4 py-2" onClick={() => setPendingDecision(null)}>Cancel</button>
+              <button className="rounded-lg border border-slate-300 px-4 py-2" onClick={() => setPendingDecision(null)}>{t("cancel")}</button>
               <button className="rounded-lg bg-accent px-4 py-2 font-semibold text-white disabled:opacity-50" disabled={!decisionConfirmed || busy} onClick={() => void confirmDecision()}>
-                {busy ? "Submitting…" : "Confirm decision"}
+                {busy ? (language === "id" ? "Mengirim…" : "Submitting…") : t("confirmDecision")}
               </button>
             </div>
           </section>

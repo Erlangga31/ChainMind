@@ -31,8 +31,18 @@ class MockSAPS4HANAClient:
 
     def _load_inventory(self) -> None:
         raw = files("chainmind.data").joinpath("seed_inventory.json").read_text(encoding="utf-8")
-        snapshot = InventorySnapshot.model_validate_json(raw)
-        self._inventory[snapshot.component_id] = snapshot
+        initial_data = json.loads(raw)
+        initial_items = initial_data if isinstance(initial_data, list) else [initial_data]
+        snapshots = [InventorySnapshot.model_validate(item) for item in initial_items]
+        additional_raw = (
+            files("chainmind.data")
+            .joinpath("seed_additional_inventory.json")
+            .read_text(encoding="utf-8")
+        )
+        snapshots.extend(
+            InventorySnapshot.model_validate(item) for item in json.loads(additional_raw)
+        )
+        self._inventory.update({snapshot.component_id: snapshot for snapshot in snapshots})
 
     def get_inventory(self, component_id: str) -> InventorySnapshot:
         """Return an OData-like inventory record."""

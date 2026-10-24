@@ -1,18 +1,31 @@
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-async function signIn(page: Page, role: "viewer" | "approver") {
+async function signIn(
+  page: Page,
+  role: "viewer" | "approver",
+  language: "id" | "en" = "en",
+) {
   await page.goto("/");
+  await page
+    .getByRole("group")
+    .getByRole("button", { name: language === "id" ? "ID" : "EN" })
+    .click();
   if (role === "approver") {
     const screenshotDirectory = resolve(process.cwd(), "../docs/screenshots");
     mkdirSync(screenshotDirectory, { recursive: true });
     await page.screenshot({
-      path: resolve(screenshotDirectory, "login.png"),
+      path: resolve(screenshotDirectory, language === "id" ? "login-id.png" : "login.png"),
       fullPage: true,
     });
   }
-  await page.getByRole("button", { name: "Sign in with ChainMind SSO" }).click();
+  await page
+    .getByRole("button", {
+      name: language === "id" ? "Masuk dengan ChainMind SSO" : "Sign in with ChainMind SSO",
+    })
+    .click();
   await page.locator('input[name="username"]').fill(role);
   await page.locator('input[name="password"]').fill("demo");
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -30,11 +43,18 @@ async function saveSection(page: Page, heading: string, filename: string) {
   await section.screenshot({ path: resolve(screenshotDirectory, filename) });
 }
 
-async function triggerScenario(page: Page, title: string, scenario?: string) {
+async function triggerScenario(
+  page: Page,
+  title: string,
+  scenario?: string,
+  language: "id" | "en" = "en",
+) {
   if (scenario) {
     await page.getByRole("combobox", { name: "Disruption scenario" }).selectOption(scenario);
   }
-  const trigger = page.getByRole("button", { name: "Trigger demo disruption" });
+  const trigger = page.getByRole("button", {
+    name: language === "id" ? "Picu gangguan demo" : "Trigger demo disruption",
+  });
   await expect(trigger).toBeEnabled();
   await trigger.click();
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
@@ -107,6 +127,66 @@ test("approver can request a vendor revision", async ({ page }) => {
   await page.getByRole("button", { name: "Confirm decision" }).click();
   await expect(page.getByText("Vendor A", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("PENDING APPROVAL", { exact: true }).first()).toBeVisible();
+});
+
+test("Indonesian dashboard is accessible and responsive", async ({ page }) => {
+  const demoTitle = "Extreme weather delays cargo ship";
+  await signIn(page, "approver", "id");
+  await triggerScenario(page, demoTitle, "weather", "id");
+  await expect(page.getByText("Deteksi Gangguan")).toBeVisible();
+  await saveSection(page, demoTitle, "timeline-id.png");
+
+  const screenshotDirectory = resolve(process.cwd(), "../docs/screenshots");
+  const chartSection = page
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: "Biaya vs waktu pengiriman" }) });
+  if (await chartSection.count()) {
+    await chartSection.screenshot({
+      path: resolve(screenshotDirectory, "vendor-charts-id.png"),
+    });
+  }
+  await saveSection(page, "Ringkasan Chain of Thought", "chain-of-thought-id.png");
+  const notifications = page.getByRole("region", { name: "Feed notifikasi" });
+  await notifications.screenshot({
+    path: resolve(screenshotDirectory, "notification-feed-id.png"),
+  });
+  await saveSection(page, "Purchase order", "po-approval-id.png");
+  await page.screenshot({
+    path: resolve(screenshotDirectory, "chainmind-pending-approval-id.png"),
+    fullPage: true,
+  });
+
+  const accessibility = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .exclude(".recharts-wrapper")
+    .analyze();
+  expect(
+    accessibility.violations.filter((violation) => ["critical", "serious"].includes(violation.impact ?? "")),
+  ).toEqual([]);
+
+  await page.keyboard.press("Tab");
+  await expect(page.locator(":focus")).toBeVisible();
+  for (const width of [375, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.getByRole("heading", { name: demoTitle })).toBeVisible();
+    const overflowingElements = await page.evaluate(() =>
+      Array.from(document.querySelectorAll("body *"))
+        .filter((element) => element.getBoundingClientRect().right > window.innerWidth + 1)
+        .slice(0, 8)
+        .map((element) => `${element.tagName}.${(element as HTMLElement).className}`),
+    );
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `horizontal page overflow at ${width}px: ${overflowingElements.join(", ")}`,
+    ).toBe(true);
+  }
+
+  await notifications.getByRole("button", { name: "Setujui" }).last().click();
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Konfirmasi keputusan" }).click();
+  await page.getByRole("button", { name: "KPI" }).click();
+  await expect(page.getByRole("heading", { name: "KPI respons" })).toBeVisible();
+  await saveSection(page, "KPI respons", "kpis-id.png");
 });
 
 for (const [id, title] of [

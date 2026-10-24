@@ -68,6 +68,8 @@ class DisruptionEvent(DomainModel):
     delay_days: float = Field(gt=0, le=365)
     event_type: DisruptionType | None = None
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
+    affected_component_ids: list[str] = Field(default_factory=list)
+    language: Literal["id", "en"] = "id"
     source: str = Field(default="external-logistics", max_length=100)
     occurred_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -98,6 +100,7 @@ class InventorySnapshot(DomainModel):
     purchase_quantity: int = Field(gt=0)
     currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
     purchase_terms: str = Field(default="Air Freight")
+    plant_region: str = "Unknown"
 
 
 class Vendor(DomainModel):
@@ -112,6 +115,8 @@ class Vendor(DomainModel):
     capacity: int = Field(gt=0)
     expedite_cost: float = Field(default=0, ge=0)
     freight_cost: float = Field(default=0, ge=0)
+    region: str = "Unknown"
+    distance_km: float = Field(default=0, ge=0)
 
 
 class VendorEvaluation(DomainModel):
@@ -124,6 +129,20 @@ class VendorEvaluation(DomainModel):
     residual_stockout_loss: float
     risk_adjusted_total: float
     rationale: str
+    same_region: bool = False
+    capacity_sufficient: bool = True
+    meets_deadline: bool = True
+
+
+class MaterialImpact(DomainModel):
+    """Impact of one BOM component in the disrupted production supply chain."""
+
+    component_id: str
+    component_name: str
+    coverage_days: float = Field(ge=0)
+    stockout_days: float = Field(ge=0)
+    cost_of_inaction: float = Field(ge=0)
+    critical: bool = False
 
 
 class ReasoningTraceStep(DomainModel):
@@ -373,6 +392,7 @@ class DisruptionRun(DomainModel):
     execution_tracking: ExecutionTracking | None = None
     kpis: RunKPI | None = None
     inventory_snapshot: InventorySnapshot | None = None
+    material_impacts: list[MaterialImpact] = Field(default_factory=list)
     approval_overdue_notified: bool = False
     workflow_task_id: str | None = None
     last_decision: DecisionRequest | None = None

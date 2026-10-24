@@ -117,6 +117,7 @@ def test_webhook_notifiers_send_channel_payloads(
                 title="Port weather delay",
                 description="Extreme weather delayed the ship.",
                 delay_days=5,
+                language="en",
             )
         ),
         "draft_ready",
@@ -142,6 +143,26 @@ def test_webhook_notifiers_send_channel_payloads(
     assert "Stock for 3 days (source: SAP S/4HANA)." in message.text
     assert "Vendor B at $135,000 (source: SAP Ariba)." in message.text
     assert "[signed" not in message.text
+
+
+def test_notification_body_uses_event_language() -> None:
+    pipeline = create_pipeline(
+        Settings(mode="mock", notification_backends=[]),
+        EventStore(),
+    )
+    run = pipeline.run(
+        DisruptionEvent(
+            title="Port weather delay",
+            description="Extreme weather delayed the ship.",
+            delay_days=5,
+            language="id",
+        )
+    )
+
+    message = make_service().notify(run, "draft_ready")
+
+    assert "Bahan baku Microchip X terlambat 5 hari." in message.text
+    assert "Setujui (membuka tinjauan eksplisit" in message.text
 
 
 def test_webhook_retries_transient_failure(fake_webhook) -> None:

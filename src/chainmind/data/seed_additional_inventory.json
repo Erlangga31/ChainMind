@@ -1,0 +1,13 @@
+[
+  {
+    "component_id": "sensor-y",
+    "component_name": "Sensor Y",
+    "current_stock": 500,
+    "daily_consumption": 500,
+    "line_stoppage_cost_per_day": 250000,
+    "purchase_quantity": 2000,
+    "currency": "USD",
+    "purchase_terms": "Air Freight",
+    "plant_region": "West Java"
+  }
+]

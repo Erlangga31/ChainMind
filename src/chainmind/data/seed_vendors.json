@@ -6,7 +6,9 @@
     "total_cost": 120000,
     "currency": "USD",
     "risk_score": 78,
-    "capacity": 10000
+    "capacity": 10000,
+    "region": "East Java",
+    "distance_km": 650
   },
   {
     "vendor_id": "vendor-b",
@@ -15,7 +17,9 @@
     "total_cost": 135000,
     "currency": "USD",
     "risk_score": 88,
-    "capacity": 8000
+    "capacity": 8000,
+    "region": "West Java",
+    "distance_km": 125
   },
   {
     "vendor_id": "vendor-c",
@@ -24,7 +28,9 @@
     "total_cost": 110000,
     "currency": "USD",
     "risk_score": 70,
-    "capacity": 12000
+    "capacity": 12000,
+    "region": "Central Java",
+    "distance_km": 420
   },
   {
     "vendor_id": "vendor-d",
@@ -33,6 +39,8 @@
     "total_cost": 100000,
     "currency": "USD",
     "risk_score": 60,
-    "capacity": 15000
+    "capacity": 15000,
+    "region": "West Java",
+    "distance_km": 300
   }
 ]

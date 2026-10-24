@@ -78,3 +78,25 @@ def test_bedrock_agents_backend_uses_configured_agent_and_alias(
     )
     assert requested == [("agent-123", "alias-456", "us-west-2")]
     assert requested == [("agent-123", "alias-456", "us-west-2")]
+
+
+@pytest.mark.parametrize(
+    "model_id", ["anthropic.claude-3-haiku-20240307-v1:0", "amazon.nova-micro-v1:0"]
+)
+def test_bedrock_model_id_is_configurable_without_code_changes(
+    model_id: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested: list[tuple[str, str]] = []
+
+    class FakeBedrockClient:
+        def __init__(self, configured_model_id: str, region: str) -> None:
+            requested.append((configured_model_id, region))
+
+    monkeypatch.setattr(factory, "BedrockLLMClient", FakeBedrockClient)
+    client = create_llm_client(
+        Settings(llm_backend="bedrock", bedrock_model_id=model_id, aws_region="us-west-2")
+    )
+
+    assert isinstance(client, FakeBedrockClient)
+    assert requested == [(model_id, "us-west-2")]
