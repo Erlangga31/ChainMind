@@ -1,10 +1,28 @@
 """HTTP-level tests for the disruption and human decision endpoints."""
 
+import pytest
 from fastapi.testclient import TestClient
 
-from chainmind.api.main import app
+import chainmind.api.main as api
+from chainmind.core.config import Settings
+from chainmind.core.events import EventStore
+from chainmind.factory import create_pipeline
 
-client = TestClient(app)
+client = TestClient(api.app)
+
+
+@pytest.fixture(autouse=True)
+def isolate_api_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep API tests independent of persisted local runs and test ordering."""
+
+    monkeypatch.setattr(
+        api,
+        "pipeline",
+        create_pipeline(
+            Settings(mode="mock", notification_backends=[]),
+            EventStore(),
+        ),
+    )
 
 
 def test_disruption_api_lists_run_and_records_rejection() -> None:

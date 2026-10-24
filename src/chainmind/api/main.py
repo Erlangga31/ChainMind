@@ -205,7 +205,11 @@ def get_kpis() -> KPIReport:
 
     tracked = [run for run in pipeline.store.list() if run.kpis is not None]
     return KPIReport(
-        simulated=any(run.kpis.simulated for run in tracked if run.kpis is not None),
+        simulated=(
+            any(run.kpis.simulated for run in tracked if run.kpis is not None)
+            if tracked
+            else not (settings.mode == "aws" and settings.resolved_sap_backend == "real")
+        ),
         tracked_runs=len(tracked),
         executed_runs=sum(run.status == RunStatus.EXECUTED for run in tracked),
         line_stoppages_avoided=sum(

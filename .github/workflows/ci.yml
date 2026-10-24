@@ -38,7 +38,17 @@ jobs:
       - name: Check formatting
         run: uv run ruff format --check src tests scripts infra sandbox
       - name: Run tests
-        run: uv run pytest -q
+        run: uv run pytest -q -ra --tb=short --junitxml=pytest-report.xml
+      - name: Publish concise pytest failures
+        if: failure() && hashFiles('pytest-report.xml') != ''
+        run: uv run python scripts/ci_annotate.py pytest-report.xml
+      - name: Upload pytest report
+        if: failure() && hashFiles('pytest-report.xml') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-pytest-report
+          path: pytest-report.xml
+          if-no-files-found: warn
 
   dashboard:
     name: Dashboard
