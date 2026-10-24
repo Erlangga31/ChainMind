@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import shutil
 import subprocess
 import sys
@@ -31,6 +32,11 @@ def prepare_lambda_package(project_root: Path) -> Path:
     if destination.exists():
         shutil.rmtree(destination)
     destination.mkdir(parents=True)
+    if importlib.util.find_spec("pip") is None:
+        subprocess.run(
+            [sys.executable, "-m", "ensurepip", "--upgrade"],
+            check=True,
+        )
     subprocess.run(
         [
             sys.executable,
