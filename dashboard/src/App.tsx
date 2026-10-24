@@ -308,6 +308,10 @@ export default function App() {
     () => run?.vendor_comparison.filter((evaluation) => evaluation.feasible) ?? [],
     [run],
   );
+  const pendingNotifications = useMemo(
+    () => runs.filter((item) => item.status === "PENDING_APPROVAL" && item.draft_po),
+    [runs],
+  );
   const pending = run?.status === "PENDING_APPROVAL";
 
   async function triggerDemo() {
@@ -342,6 +346,23 @@ export default function App() {
       setRun(await request<DisruptionRun>(`/runs/${runId}`));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load this run.");
+    }
+  }
+
+  async function openNotificationApproval(runId: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const detail = await request<DisruptionRun>(`/runs/${runId}`);
+      setSelectedId(runId);
+      setRun(detail);
+      setNotificationToken("");
+      setPendingDecision("approve");
+      setDecisionConfirmed(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not open this approval.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -471,6 +492,47 @@ export default function App() {
         </section>
 
         {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div>}
+
+        <section aria-label="Notification feed" className="rounded-2xl bg-white p-5 shadow-card">
+          <h2 className="text-lg font-bold text-ink">Notification feed</h2>
+          {pendingNotifications.length === 0 ? (
+            <p className="mt-2 text-sm text-slate-500">No pending approval notifications.</p>
+          ) : (
+            <ul className="mt-3 space-y-3">
+              {pendingNotifications.map((item) => {
+                const inventory = item.inventory_snapshot;
+                const coverageDays = inventory
+                  ? inventory.current_stock / inventory.daily_consumption
+                  : 0;
+                return (
+                  <li key={item.run_id} className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-200 p-4">
+                    <p className="min-w-60 flex-1 text-sm leading-6 text-slate-700">
+                      Raw material {item.event.component_name} delayed {item.event.delay_days} days.
+                      {" "}Stock for {coverageDays.toLocaleString("en-US", { maximumFractionDigits: 1 })} days
+                      {" "}(source: SAP S/4HANA). Recommendation: buy from {item.draft_po?.vendor_name}
+                      {" "}at {money(item.draft_po?.total_price ?? 0)} (source: SAP Ariba).
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={busy || role !== "approver"}
+                        onClick={() => void openNotificationApproval(item.run_id)}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                        onClick={() => void selectRun(item.run_id)}
+                      >
+                        View details
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
 
         <nav className="flex gap-2" aria-label="Dashboard sections">
           <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "runs" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("runs")}>Disruptions</button>

@@ -126,7 +126,7 @@ npm ci
 npm run dev
 ```
 
-Buka `http://localhost:5173`, klik **Sign in with ChainMind SSO**, lalu masuk sebagai `viewer` atau `approver` (password `demo`). Pilih skenario, lalu klik **Trigger demo disruption**. Dashboard menampilkan linimasa enam tahap, dampak stok, tabel serta grafik vendor, trace per sumber, audit log, draf PO dengan dialog konfirmasi, tracking dan halaman KPI ilustratif. Viewer tetap read-only; hanya bearer token terverifikasi dengan role approver yang dapat mengirim keputusan.
+Buka `http://localhost:5173`, klik **Sign in with ChainMind SSO**, lalu masuk sebagai `viewer` atau `approver` (password `demo`). Pilih skenario, lalu klik **Trigger demo disruption**. Dashboard menampilkan linimasa enam tahap, dampak stok, tabel serta grafik vendor, trace per sumber, audit log, feed notifikasi dengan sumber SAP, draf PO dengan dialog konfirmasi, tracking dan halaman KPI ilustratif. Viewer tetap read-only; hanya bearer token terverifikasi dengan role approver yang dapat mengirim keputusan. Tombol **Approve** pada feed hanya membuka dialog konfirmasi dan tidak mengeksekusi PO secara langsung.
 
 ![Dashboard ChainMind dengan draf PO Vendor B yang menunggu persetujuan](./docs/screenshots/chainmind-pending-approval.png)
 
@@ -275,11 +275,12 @@ chainmind/
 
 **Disclaimer MVP:** integrasi SAP saat ini adalah mock/stub; seed data, event store mock, dan keputusan human-in-the-loop lokal dimaksudkan untuk demo. AWS CDK adalah scaffold yang dapat disintesis, bukan deployment atau sertifikasi kesiapan produksi.
 
-Notifikasi Teams/Slack diuji menggunakan transport HTTP mock; email lokal ditulis ke outbox JSONL,
-sedangkan SES hanya dipanggil pada AWS mode. Link tindakan bertanda tangan dan kedaluwarsa tidak
-mengeksekusi PO melalui GET: link approval memerlukan role `approver` serta konfirmasi eksplisit.
-Pengingat lokal diperiksa lewat `pipeline.check_approval_overdue`; CDK menjalankan pemeriksaan
-terjadwal dan menyediakan timeout Step Functions sebagai eskalasi cadangan.
+Notifikasi Teams/Slack diuji terhadap server HTTP lokal untuk memeriksa Adaptive Card, Block Kit,
+retry, dan kegagalan; SES diverifikasi dengan botocore Stubber tanpa mengirim email. Link tindakan
+bertanda tangan dan kedaluwarsa tidak mengeksekusi PO melalui GET: link approval memerlukan role
+`approver` serta konfirmasi eksplisit. Eskalasi approval overdue diuji end-to-end dan hanya menambah
+audit/notifikasi; status PO tetap menunggu persetujuan. CDK menjalankan pemeriksaan terjadwal dan
+menyediakan timeout Step Functions sebagai eskalasi cadangan.
 
 ## Proposal coverage matrix
 

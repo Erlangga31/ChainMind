@@ -28,6 +28,12 @@ test("approver resolves weather disruption and completes execution tracking", as
   await expect(page.getByText("Vendor B", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("$135,000", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Air Freight")).toBeVisible();
+  const notifications = page.getByRole("region", { name: "Notification feed" });
+  await expect(
+    notifications.getByText(
+      "Raw material Microchip X delayed 5 days. Stock for 3 days (source: SAP S/4HANA). Recommendation: buy from Vendor B at $135,000 (source: SAP Ariba).",
+    ),
+  ).toBeVisible();
 
   const screenshotDirectory = resolve(process.cwd(), "../docs/screenshots");
   mkdirSync(screenshotDirectory, { recursive: true });
@@ -36,7 +42,8 @@ test("approver resolves weather disruption and completes execution tracking", as
     fullPage: true,
   });
 
-  await page.getByRole("button", { name: "Review approval" }).click();
+  await notifications.getByRole("button", { name: "Approve" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
   await page.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Confirm decision" }).click();
   await expect(page.getByRole("heading", { name: "Execution & tracking" })).toBeVisible();
@@ -48,6 +55,10 @@ test("approver resolves weather disruption and completes execution tracking", as
 test("viewer can inspect a draft but cannot approve it", async ({ page }) => {
   await signIn(page, "viewer");
   await triggerScenario(page, "Extreme weather delays cargo ship", "weather");
+  const notifications = page.getByRole("region", { name: "Notification feed" });
+  await expect(notifications.getByText(/Vendor B at \$135,000/)).toBeVisible();
+  await expect(notifications.getByRole("button", { name: "Approve" })).toBeDisabled();
+  await expect(notifications.getByRole("button", { name: "View details" })).toBeEnabled();
   await expect(page.getByText(/Viewer access is read-only/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Review approval" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Reject" })).toHaveCount(0);

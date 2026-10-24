@@ -1,5 +1,6 @@
 """Console, webhook, and email notification channel implementations."""
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -149,8 +150,27 @@ def _post_json(
     payload: dict[str, Any],
     channel: str,
 ) -> None:
-    try:
-        response = client.post(webhook_url, json=payload)
-        response.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise IntegrationError(f"The {channel} notification could not be delivered.") from exc
+    last_error: httpx.HTTPError | None = None
+    for attempt in range(3):
+        try:
+            response = client.post(webhook_url, json=payload)
+            if response.is_success:
+                return
+            if response.status_code != 429 and response.status_code < 500:
+                response.raise_for_status()
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 429 and exc.response.status_code < 500:
+                raise IntegrationError(
+                    f"The {channel} notification could not be delivered."
+                ) from exc
+            last_error = exc
+        except httpx.RequestError as exc:
+            last_error = exc
+
+        if attempt < 2:
+            time.sleep(0.05 * (2**attempt))
+
+    raise IntegrationError(
+        f"The {channel} notification could not be delivered after 3 attempts."
+    ) from last_error

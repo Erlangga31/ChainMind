@@ -1,10 +1,14 @@
 """Notification channel, signed-link, and workflow-trigger behavior."""
 
+import json
 from datetime import UTC, date, datetime, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 from uuid import UUID, uuid4
 
-import httpx
+import boto3
 import pytest
+from botocore.stub import Stubber
 from fastapi.testclient import TestClient
 
 from chainmind.core.config import Settings
@@ -32,6 +36,40 @@ class CaptureNotifier:
 
     def send(self, message) -> None:
         self.messages.append(message)
+
+
+@pytest.fixture
+def fake_webhook():
+    captured: list[dict[str, object]] = []
+    statuses: list[int] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            length = int(self.headers["Content-Length"])
+            captured.append(
+                {
+                    "path": self.path,
+                    "content_type": self.headers["Content-Type"],
+                    "payload": json.loads(self.rfile.read(length)),
+                }
+            )
+            status = statuses.pop(0) if statuses else 200
+            self.send_response(status)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/webhook", captured, statuses
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
 
 
 def make_service(notifier: CaptureNotifier | None = None) -> NotificationService:
@@ -69,17 +107,10 @@ def test_signed_links_validate_expiration_and_tampering() -> None:
 def test_webhook_notifiers_send_channel_payloads(
     notifier_type,
     expected_key: str,
+    fake_webhook,
 ) -> None:
-    captured: list[dict[str, object]] = []
-
-    def respond(request: httpx.Request) -> httpx.Response:
-        import json
-
-        captured.append(json.loads(request.content))
-        return httpx.Response(200)
-
-    client = httpx.Client(transport=httpx.MockTransport(respond))
-    notifier = notifier_type("https://webhook.example.invalid", client)
+    url, captured, _ = fake_webhook
+    notifier = notifier_type(url)
     message = make_service().notify(
         create_pipeline(Settings(mode="mock", notification_backends=[]), EventStore()).run(
             DisruptionEvent(
@@ -93,19 +124,48 @@ def test_webhook_notifiers_send_channel_payloads(
 
     notifier.send(message)
 
-    assert expected_key in captured[0]
+    assert captured[0]["path"] == "/webhook"
+    assert captured[0]["content_type"].startswith("application/json")
+    payload = captured[0]["payload"]
+    assert isinstance(payload, dict)
+    assert expected_key in payload
+    if notifier_type is TeamsNotifier:
+        card = payload["attachments"][0]["content"]
+        assert card["type"] == "AdaptiveCard"
+        assert card["actions"][0]["url"] == message.approve_url
+        assert card["actions"][1]["url"] == message.view_url
+    else:
+        assert payload["blocks"][0]["type"] == "section"
+        assert payload["blocks"][1]["type"] == "actions"
+        assert payload["blocks"][1]["elements"][0]["url"] == message.approve_url
     assert "Raw material Microchip X delayed 5 days." in message.text
     assert "Stock for 3 days (source: SAP S/4HANA)." in message.text
     assert "Vendor B at $135,000 (source: SAP Ariba)." in message.text
     assert "[signed" not in message.text
-    client.close()
 
 
-def test_webhook_delivery_failure_is_reported() -> None:
-    client = httpx.Client(
-        transport=httpx.MockTransport(lambda request: httpx.Response(503, request=request))
+def test_webhook_retries_transient_failure(fake_webhook) -> None:
+    url, captured, statuses = fake_webhook
+    statuses.extend([503, 200])
+    notifier = SlackNotifier(url)
+    run = create_pipeline(Settings(mode="mock", notification_backends=[]), EventStore()).run(
+        DisruptionEvent(
+            title="Port weather delay",
+            description="Extreme weather delayed the ship.",
+            delay_days=5,
+        )
     )
-    notifier = SlackNotifier("https://webhook.example.invalid", client)
+
+    notifier.send(make_service().notify(run, "draft_ready"))
+
+    assert len(captured) == 2
+    notifier.close()
+
+
+def test_webhook_delivery_failure_is_reported(fake_webhook) -> None:
+    url, captured, statuses = fake_webhook
+    statuses.extend([503, 503, 503])
+    notifier = SlackNotifier(url)
     run = create_pipeline(Settings(mode="mock", notification_backends=[]), EventStore()).run(
         DisruptionEvent(
             title="Port weather delay",
@@ -116,7 +176,8 @@ def test_webhook_delivery_failure_is_reported() -> None:
 
     with pytest.raises(IntegrationError, match="Slack notification"):
         notifier.send(make_service().notify(run, "draft_ready"))
-    client.close()
+    assert len(captured) == 3
+    notifier.close()
 
 
 def test_mock_email_writes_notification_to_jsonl_outbox(tmp_path) -> None:
@@ -143,6 +204,53 @@ def test_mock_email_writes_notification_to_jsonl_outbox(tmp_path) -> None:
 
     assert len(outbox.read_text(encoding="utf-8").splitlines()) == 1
     assert "Vendor B" in outbox.read_text(encoding="utf-8")
+
+
+def test_aws_email_uses_ses_send_email_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ses_client = boto3.client(
+        "ses",
+        region_name="us-east-1",
+        aws_access_key_id="test-access-key",
+        aws_secret_access_key="test-secret-key",
+    )
+    monkeypatch.setattr(
+        "chainmind.notifications.channels.boto3.client",
+        lambda service, region_name: ses_client,
+    )
+    run = create_pipeline(Settings(mode="mock", notification_backends=[]), EventStore()).run(
+        DisruptionEvent(
+            title="Weather delay",
+            description="A storm delayed the component cargo.",
+            delay_days=5,
+        )
+    )
+    message = make_service().notify(run, "draft_ready")
+    expected = {
+        "Source": "demo@example.invalid",
+        "Destination": {"ToAddresses": ["judge@example.invalid"]},
+        "Message": {
+            "Subject": {"Data": message.subject, "Charset": "UTF-8"},
+            "Body": {"Text": {"Data": message.text, "Charset": "UTF-8"}},
+        },
+    }
+    notifier = EmailNotifier(
+        mode="aws",
+        sender="demo@example.invalid",
+        recipient="judge@example.invalid",
+        region_name="us-east-1",
+        outbox_path="unused.jsonl",
+    )
+
+    with Stubber(ses_client) as stubber:
+        stubber.add_response(
+            "send_email",
+            {"MessageId": "demo-message-id"},
+            expected_params=expected,
+        )
+        notifier.send(message)
+        stubber.assert_no_pending_responses()
 
 
 def test_mock_pipeline_notifies_draft_and_escalates_overdue_once() -> None:
@@ -175,6 +283,13 @@ def test_mock_pipeline_notifies_draft_and_escalates_overdue_once() -> None:
         "draft_ready",
         "approval_overdue",
     ]
+    stored = pipeline.store.get(run.run_id)
+    assert stored is not None
+    assert stored.status == RunStatus.PENDING_APPROVAL
+    assert stored.approval_overdue_notified is True
+    assert stored.last_decision is None
+    assert stored.audit_log[-1].agent == "notifications"
+    assert stored.audit_log[-1].output_summary == "Approval overdue escalation delivered."
 
 
 def test_eta_deviation_triggers_tracking_alert() -> None:

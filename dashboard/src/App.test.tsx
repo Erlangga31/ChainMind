@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { pendingRun } from "./test-fixtures";
@@ -55,6 +55,12 @@ describe("OIDC-authenticated approval dashboard", () => {
     expect(screen.queryByRole("button", { name: "Review approval" })).not.toBeInTheDocument();
     expect(screen.getByText("demo-viewer · viewer")).toBeInTheDocument();
     expect(sessionStorage.getItem("chainmind.access_token")).toBeNull();
+    const feed = screen.getByRole("region", { name: "Notification feed" });
+    expect(feed).toHaveTextContent(
+      "Raw material Microchip X delayed 5 days. Stock for 3 days (source: SAP S/4HANA). Recommendation: buy from Vendor B at $135,000 (source: SAP Ariba).",
+    );
+    expect(within(feed).getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(within(feed).getByRole("button", { name: "View details" })).toBeEnabled();
   });
 
   it("allows authenticated approvers to confirm a decision with the bearer token", async () => {
@@ -80,5 +86,21 @@ describe("OIDC-authenticated approval dashboard", () => {
       decision: "approve",
       note: "",
     });
+  });
+
+  it("opens a confirmation dialog from the notification feed without approving directly", async () => {
+    installAuthenticatedFetch("approver");
+
+    render(<App />);
+    const feed = await screen.findByRole("region", { name: "Notification feed" });
+    fireEvent.click(within(feed).getByRole("button", { name: "Approve" }));
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(
+      vi.mocked(fetch).mock.calls.some(([input]) =>
+        String(input).endsWith("/runs/demo-run/decision"),
+      ),
+    ).toBe(false);
+    expect(screen.getByRole("button", { name: "Confirm decision" })).toBeDisabled();
   });
 });

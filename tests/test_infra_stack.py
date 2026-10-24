@@ -80,3 +80,34 @@ def test_state_machine_has_bounded_revision_and_callback_states() -> None:
     assert "HumanRejected" in serialized
     assert "SendWorkflowFailureToDLQ" in serialized
     assert "TracingConfiguration" in serialized
+
+
+def test_overdue_schedule_targets_escalation_and_signed_approval_route_is_protected() -> None:
+    template = Template.from_stack(ChainMindStack(App(), "TestNotificationStack"))
+    resources = template.find_resources("AWS::ApiGateway::Resource")
+    logical_ids = {
+        resource["Properties"]["PathPart"]: logical_id
+        for logical_id, resource in resources.items()
+        if resource.get("Properties", {}).get("PathPart")
+        in {"notifications", "links", "{token}", "approve"}
+    }
+    approve_id = logical_ids["approve"]
+    token_id = logical_ids["{token}"]
+    assert resources[approve_id]["Properties"]["ParentId"] == {"Ref": token_id}
+
+    template.has_resource_properties(
+        "AWS::ApiGateway::Method",
+        {
+            "HttpMethod": "POST",
+            "ResourceId": {"Ref": approve_id},
+            "AuthorizationType": "COGNITO_USER_POOLS",
+        },
+    )
+    scheduled_rules = [
+        rule
+        for rule in template.find_resources("AWS::Events::Rule").values()
+        if rule.get("Properties", {}).get("ScheduleExpression") == "rate(15 minutes)"
+        and "ApprovalOverdueNotifier" in json.dumps(rule.get("Properties", {}).get("Targets", []))
+    ]
+    assert len(scheduled_rules) == 1
+    assert "ApprovalOverdueNotifier" in json.dumps(scheduled_rules[0]["Properties"]["Targets"])
