@@ -9,7 +9,7 @@ services:
     ports:
       - "4566:4566"
     healthcheck:
-      test: ["CMD", "bash", "-c", "curl -fsS http://localhost:4566/_localstack/health | grep -q '\"initialized\": true'"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:4566/_localstack/health"]
       interval: 5s
       timeout: 10s
       retries: 30

@@ -135,7 +135,7 @@ jobs:
         ports:
           - 4566:4566
         options: >-
-          --health-cmd "curl -fsS http://localhost:4566/_localstack/health | grep -q '\"initialized\": true'"
+          --health-cmd "curl -fsS http://localhost:4566/_localstack/health"
           --health-interval 5s
           --health-timeout 10s
           --health-retries 30
