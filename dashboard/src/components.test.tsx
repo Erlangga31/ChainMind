@@ -5,11 +5,12 @@ import {
   AuditViewer,
   ImpactPanel,
   KpiCards,
+  UsageCard,
   VendorCharts,
   WorkflowTimeline,
 } from "./components";
 import { pendingRun } from "./test-fixtures";
-import type { KPIReport, VendorEvaluation } from "./types";
+import type { KPIReport, UsageReport, VendorEvaluation } from "./types";
 
 const vendorEvaluations: VendorEvaluation[] = [
   {
@@ -57,6 +58,34 @@ const report: KPIReport = {
   illustrative_cost_of_inaction: 250000,
   illustrative_action_cost: 135000,
   illustrative_savings: 115000,
+  comparison: [
+    {
+      metric: "Response time",
+      unit: "minutes",
+      manual_baseline: 240,
+      chainmind_value: 1.5,
+      manual_is_illustrative: true,
+      chainmind_is_illustrative: false,
+    },
+  ],
+};
+
+const usage: UsageReport = {
+  tenant_id: "demo",
+  period_start: "2026-10-01",
+  plan_tier: "Starter",
+  resolved_disruptions: 12,
+  included_disruptions: 10,
+  active_agents: 5,
+  included_agents: 4,
+  monthly_subscription_fee: 500,
+  disruption_overage_fee: 100,
+  additional_agent_fee: 100,
+  one_time_onboarding_fee: 1000,
+  illustrative_monthly_estimate: 700,
+  illustrative_first_invoice_estimate: 1700,
+  illustrative: true,
+  label: "Illustrative estimate only; not a quote or invoice.",
 };
 
 describe("dashboard visual components", () => {
@@ -152,5 +181,19 @@ describe("dashboard visual components", () => {
     expect(screen.getByText("Response KPIs")).toBeInTheDocument();
     expect(screen.getByText("Illustrative savings")).toBeInTheDocument();
     expect(screen.getByText("$115,000")).toBeInTheDocument();
+    expect(screen.getByText("Manual baseline vs ChainMind")).toBeInTheDocument();
+    expect(screen.getByText("240 minutes · illustrative")).toBeInTheDocument();
+  });
+
+  it("renders tenant usage and explicitly separates onboarding from monthly charges", () => {
+    render(<UsageCard report={usage} />);
+
+    expect(screen.getByText("Usage & Plan")).toBeInTheDocument();
+    expect(screen.getByText("Usage month")).toBeInTheDocument();
+    expect(screen.getByText("2026-10")).toBeInTheDocument();
+    expect(screen.getByText("Resolved disruptions")).toBeInTheDocument();
+    expect(screen.getByText("One-time onboarding")).toBeInTheDocument();
+    expect(screen.getByText("$1,700")).toBeInTheDocument();
+    expect(screen.getAllByText(/not a quote or invoice/)).toHaveLength(2);
   });
 });

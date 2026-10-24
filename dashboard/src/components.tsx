@@ -10,7 +10,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { DisruptionRun, KPIReport, VendorEvaluation } from "./types";
+import type { DisruptionRun, KPIReport, UsageReport, VendorEvaluation } from "./types";
 
 const timeline = [
   { label: "Deteksi Gangguan", match: ["monitoring"] },
@@ -224,6 +224,73 @@ export function KpiCards({ report }: { report: KPIReport }) {
         <Metric label="Action cost" value={money(report.illustrative_action_cost)} />
         <Metric label="Illustrative savings" value={money(report.illustrative_savings)} />
       </div>
+      <h2 className="mt-8 text-lg font-bold text-ink">Manual baseline vs ChainMind</h2>
+      <p className="mt-1 text-sm text-slate-600">
+        Proposal baselines and targets are illustrative. ChainMind values use completed run data
+        where available.
+      </p>
+      <div className="mt-4 overflow-x-auto">
+        <table className="w-full min-w-[560px] text-left text-sm">
+          <thead className="border-b text-xs uppercase text-slate-500">
+            <tr>
+              <th className="py-2 pr-3">Metric</th>
+              <th className="py-2 pr-3">Manual baseline</th>
+              <th className="py-2">ChainMind</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.comparison.map((item) => (
+              <tr key={item.metric} className="border-b last:border-0">
+                <th className="py-3 pr-3 font-semibold text-ink">{item.metric}</th>
+                <td className="py-3 pr-3 text-slate-600">
+                  {formatComparison(item.manual_baseline, item.unit)}
+                  {item.manual_is_illustrative && " · illustrative"}
+                </td>
+                <td className="py-3 text-slate-600">
+                  {formatComparison(item.chainmind_value, item.unit)}
+                  {item.chainmind_is_illustrative && " · illustrative target"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+export function UsageCard({ report }: { report: UsageReport }) {
+  return (
+    <section className="rounded-2xl bg-white p-5 shadow-card md:p-7">
+      <p className="text-sm font-semibold uppercase tracking-wide text-accent">
+        Illustrative · not a quote or invoice
+      </p>
+      <h1 className="mt-1 text-2xl font-bold text-ink">Usage &amp; Plan</h1>
+      <p className="mt-2 text-sm text-slate-600">{report.label}</p>
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <Metric label="Usage month" value={report.period_start.slice(0, 7)} />
+        <Metric label="Plan tier" value={report.plan_tier} />
+        <Metric
+          label="Resolved disruptions"
+          value={`${report.resolved_disruptions} / ${report.included_disruptions} included`}
+        />
+        <Metric
+          label="Active agents"
+          value={`${report.active_agents} / ${report.included_agents} included`}
+        />
+        <Metric label="Monthly subscription" value={money(report.monthly_subscription_fee)} />
+        <Metric label="Disruption overage" value={money(report.disruption_overage_fee)} />
+        <Metric label="Additional agents" value={money(report.additional_agent_fee)} />
+        <Metric label="One-time onboarding" value={money(report.one_time_onboarding_fee)} />
+        <Metric
+          label="Illustrative monthly estimate"
+          value={money(report.illustrative_monthly_estimate)}
+        />
+        <Metric
+          label="Illustrative first invoice"
+          value={money(report.illustrative_first_invoice_estimate)}
+        />
+      </div>
     </section>
   );
 }
@@ -235,6 +302,12 @@ function Metric({ label, value }: { label: string; value: string }) {
       <strong className="mt-1 block text-lg text-ink">{value}</strong>
     </p>
   );
+}
+
+function formatComparison(value: number | null, unit: string): string {
+  if (value === null) return "No run data";
+  const formatted = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(value);
+  return unit === "percent" ? `${formatted}%` : `${formatted} ${unit}`;
 }
 
 function money(value: number): string {

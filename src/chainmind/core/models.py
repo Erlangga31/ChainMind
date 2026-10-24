@@ -60,6 +60,7 @@ class DisruptionEvent(DomainModel):
     """External supply-chain disruption supplied by an operator or event source."""
 
     event_id: UUID = Field(default_factory=uuid4)
+    tenant_id: str = Field(default="demo", min_length=1, max_length=100)
     title: str = Field(min_length=3, max_length=160)
     description: str = Field(min_length=3, max_length=2_000)
     component_id: str = Field(default="microchip-x", min_length=1, max_length=100)
@@ -274,6 +275,18 @@ class RunKPI(DomainModel):
     illustrative_savings: float
     line_stoppage_avoided: bool
     estimated_stockout_days_avoided: float = Field(ge=0)
+    response_time_seconds: float | None = Field(default=None, ge=0)
+
+
+class KPIComparison(DomainModel):
+    """Manual-versus-ChainMind comparison with provenance for each value."""
+
+    metric: str
+    unit: str
+    manual_baseline: float | None
+    chainmind_value: float | None
+    manual_is_illustrative: bool
+    chainmind_is_illustrative: bool
 
 
 class KPIReport(DomainModel):
@@ -287,6 +300,27 @@ class KPIReport(DomainModel):
     illustrative_cost_of_inaction: float = Field(ge=0)
     illustrative_action_cost: float = Field(ge=0)
     illustrative_savings: float
+    comparison: list[KPIComparison] = Field(default_factory=list)
+
+
+class UsageReport(DomainModel):
+    """Illustrative tenant usage and first-invoice estimate."""
+
+    tenant_id: str
+    period_start: date
+    plan_tier: Literal["Starter", "Professional", "Enterprise"]
+    resolved_disruptions: int = Field(ge=0)
+    included_disruptions: int = Field(ge=0)
+    active_agents: int = Field(ge=0)
+    included_agents: int = Field(ge=0)
+    monthly_subscription_fee: float = Field(ge=0)
+    disruption_overage_fee: float = Field(ge=0)
+    additional_agent_fee: float = Field(ge=0)
+    one_time_onboarding_fee: float = Field(ge=0)
+    illustrative_monthly_estimate: float = Field(ge=0)
+    illustrative_first_invoice_estimate: float = Field(ge=0)
+    illustrative: bool = True
+    label: str = "Illustrative estimate only; not a quote or invoice."
 
 
 class NotificationMessage(DomainModel):
@@ -305,6 +339,7 @@ class NotificationLinkPayload(DomainModel):
     """Short-lived signed action link claims."""
 
     run_id: UUID
+    tenant_id: str = "demo"
     action: Literal["approve", "view"]
     expires_at: int = Field(gt=0)
 
@@ -320,6 +355,7 @@ class DisruptionRun(DomainModel):
     """Persisted result of one disruption analysis."""
 
     run_id: UUID = Field(default_factory=uuid4)
+    tenant_id: str = Field(default="demo", min_length=1, max_length=100)
     event: DisruptionEvent
     status: RunStatus = RunStatus.ANALYZING
     workflow_state: WorkflowState = WorkflowState.INGESTED

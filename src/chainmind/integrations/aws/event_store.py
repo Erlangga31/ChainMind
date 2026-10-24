@@ -39,6 +39,7 @@ class DynamoDBEventStore(RunStore):
                     "run_id": event_record_id(run.event),
                     "created_at": run.created_at.isoformat(),
                     "event_key": run.event.dedupe_key,
+                    "tenant_id": run.tenant_id,
                     "event_id": str(run.event.event_id),
                     "linked_run_id": str(run.run_id),
                 }
@@ -82,11 +83,13 @@ class DynamoDBEventStore(RunStore):
             ) from exc
         return DisruptionRun.model_validate_json(item["run_data"]) if item else None
 
-    def get_by_idempotency_key(self, key: str) -> DisruptionRun | None:
+    def get_by_idempotency_key(self, key: str, tenant_id: str = "demo") -> DisruptionRun | None:
         """Resolve an idempotency index record to its stored run."""
 
         try:
-            link = self._table.get_item(Key={"run_id": event_record_id_for_key(key)}).get("Item")
+            link = self._table.get_item(
+                Key={"run_id": event_record_id_for_key(key, tenant_id)}
+            ).get("Item")
             if not link or not link.get("linked_run_id"):
                 return None
             item = self._table.get_item(Key={"run_id": link["linked_run_id"]}).get("Item")
@@ -95,7 +98,10 @@ class DynamoDBEventStore(RunStore):
                 "The event idempotency key could not be read from DynamoDB.",
                 details={"reason": str(exc)},
             ) from exc
-        return DisruptionRun.model_validate_json(item["run_data"]) if item else None
+        if not item:
+            return None
+        run = DisruptionRun.model_validate_json(item["run_data"])
+        return run if run.tenant_id == tenant_id else None
 
     def list(self) -> list[DisruptionRun]:
         """Scan all local-demo runs; production should use a paginated query index."""

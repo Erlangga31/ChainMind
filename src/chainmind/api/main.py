@@ -2,6 +2,7 @@
 
 import json
 import logging
+from collections import Counter
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
@@ -12,7 +13,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from chainmind.api.identity import AuthenticatedUser, require_approver
+from chainmind.api.identity import (
+    AuthenticatedUser,
+    require_approver,
+    require_usage_access,
+    tenant_context,
+)
 from chainmind.core.config import get_settings
 from chainmind.core.errors import ChainMindError
 from chainmind.core.models import (
@@ -23,11 +29,14 @@ from chainmind.core.models import (
     DisruptionEvent,
     DisruptionRun,
     ErrorResponse,
+    KPIComparison,
     KPIReport,
     NotificationApprovalRequest,
     RunCreatedResponse,
     RunStatus,
+    UsageReport,
 )
+from chainmind.core.usage import calculate_usage
 from chainmind.factory import create_pipeline
 from chainmind.integrations.aws.approval import StepFunctionsApprovalClient
 from chainmind.integrations.aws.event_publisher import EventBridgePublisher
@@ -135,12 +144,14 @@ def health() -> dict[str, str]:
 @app.post("/disruptions", response_model=RunCreatedResponse, status_code=201)
 def ingest_disruption(
     event: DisruptionEvent,
+    user: Annotated[AuthenticatedUser, Depends(tenant_context)],
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> RunCreatedResponse:
     """Accept an event and run the disruption response pipeline."""
 
     if idempotency_key:
         event.idempotency_key = idempotency_key
+    event.tenant_id = user.tenant_id
     if settings.mode == "aws":
         try:
             canonical_event_id, _ = EventBridgePublisher(
@@ -195,17 +206,91 @@ async def ingest_signed_event(request: Request) -> RunCreatedResponse:
 
 
 @app.get("/runs", response_model=list[DisruptionRun])
-def list_runs() -> list[DisruptionRun]:
+def list_runs(user: Annotated[AuthenticatedUser, Depends(tenant_context)]) -> list[DisruptionRun]:
     """List locally persisted disruption analyses."""
 
-    return pipeline.store.list()
+    return [run for run in pipeline.store.list() if run.tenant_id == user.tenant_id]
 
 
 @app.get("/kpis", response_model=KPIReport)
-def get_kpis() -> KPIReport:
+def get_kpis(user: Annotated[AuthenticatedUser, Depends(tenant_context)]) -> KPIReport:
     """Return explicitly illustrative aggregate outcomes from completed tracking runs."""
 
-    tracked = [run for run in pipeline.store.list() if run.kpis is not None]
+    tracked = [
+        run
+        for run in pipeline.store.list()
+        if run.tenant_id == user.tenant_id and run.kpis is not None
+    ]
+    response_times = [
+        run.kpis.response_time_seconds
+        for run in tracked
+        if run.kpis is not None and run.kpis.response_time_seconds is not None
+    ]
+    comparable_decisions: dict[tuple[object, ...], list[str]] = {}
+    for run in tracked:
+        inventory = run.inventory_snapshot
+        if inventory is None or run.selected_vendor_id is None:
+            continue
+        signature = (
+            run.event.component_id,
+            run.event.event_type,
+            run.event.delay_days,
+            inventory.current_stock,
+            inventory.daily_consumption,
+        )
+        comparable_decisions.setdefault(signature, []).append(run.selected_vendor_id)
+    repeated_decisions = [
+        vendor_ids for vendor_ids in comparable_decisions.values() if len(vendor_ids) > 1
+    ]
+    consistency = (
+        sum(max(Counter(vendor_ids).values()) for vendor_ids in repeated_decisions)
+        / sum(len(vendor_ids) for vendor_ids in repeated_decisions)
+        * 100
+        if repeated_decisions
+        else None
+    )
+    comparison = [
+        KPIComparison(
+            metric="Response time",
+            unit="minutes",
+            manual_baseline=240,
+            chainmind_value=(
+                sum(response_times) / len(response_times) / 60 if response_times else None
+            ),
+            manual_is_illustrative=True,
+            chainmind_is_illustrative=False,
+        ),
+        KPIComparison(
+            metric="Line-stoppage risk",
+            unit="percent",
+            manual_baseline=35,
+            chainmind_value=(
+                sum(not run.kpis.line_stoppage_avoided for run in tracked if run.kpis is not None)
+                / len(tracked)
+                * 100
+                if tracked
+                else None
+            ),
+            manual_is_illustrative=True,
+            chainmind_is_illustrative=False,
+        ),
+        KPIComparison(
+            metric="Procurement workload",
+            unit="hours per disruption",
+            manual_baseline=4,
+            chainmind_value=0.5,
+            manual_is_illustrative=True,
+            chainmind_is_illustrative=True,
+        ),
+        KPIComparison(
+            metric="Decision consistency",
+            unit="percent",
+            manual_baseline=75,
+            chainmind_value=consistency,
+            manual_is_illustrative=True,
+            chainmind_is_illustrative=consistency is None,
+        ),
+    ]
     return KPIReport(
         simulated=(
             any(run.kpis.simulated for run in tracked if run.kpis is not None)
@@ -226,7 +311,31 @@ def get_kpis() -> KPIReport:
         illustrative_savings=sum(
             run.kpis.illustrative_savings for run in tracked if run.kpis is not None
         ),
+        comparison=comparison,
     )
+
+
+@app.get("/usage", response_model=UsageReport)
+def get_usage(
+    user: Annotated[AuthenticatedUser, Depends(require_usage_access)],
+) -> UsageReport:
+    """Return tenant-scoped usage and illustrative plan charges."""
+
+    return calculate_usage(user.tenant_id, pipeline.store.list(), settings)
+
+
+def _get_tenant_run(run_id: UUID, tenant_id: str) -> DisruptionRun:
+    """Return a run only when it belongs to the requested tenant."""
+
+    run = pipeline.get_run(run_id)
+    if run.tenant_id != tenant_id:
+        raise ChainMindError(
+            "run_not_found",
+            "No disruption run exists with that ID.",
+            status_code=404,
+            details={"run_id": str(run_id)},
+        )
+    return run
 
 
 @app.get("/notifications/links/{token}")
@@ -234,7 +343,7 @@ def inspect_notification_link(token: str) -> dict[str, object]:
     """Inspect a signed link without taking an approval or financial action."""
 
     claims = pipeline.validate_notification_link(token)
-    run = pipeline.get_run(claims.run_id)
+    run = _get_tenant_run(claims.run_id, claims.tenant_id)
     if claims.action == "approve":
         return {
             "run_id": str(run.run_id),
@@ -260,6 +369,12 @@ def approve_from_notification_link(
     """Require both an authenticated approver role and explicit link confirmation."""
 
     claims = pipeline.validate_notification_link(token)
+    if claims.tenant_id != approver.tenant_id:
+        raise ChainMindError(
+            "run_not_found",
+            "No disruption run exists with that notification link.",
+            status_code=404,
+        )
     if claims.action != "approve":
         raise ChainMindError(
             "notification_action_mismatch",
@@ -280,10 +395,13 @@ def approve_from_notification_link(
 
 
 @app.get("/runs/{run_id}", response_model=DisruptionRun)
-def get_run(run_id: UUID) -> DisruptionRun:
+def get_run(
+    run_id: UUID,
+    user: Annotated[AuthenticatedUser, Depends(tenant_context)],
+) -> DisruptionRun:
     """Return full analysis, comparison, reasoning, draft PO, and audit."""
 
-    return pipeline.get_run(run_id)
+    return _get_tenant_run(run_id, user.tenant_id)
 
 
 @app.post("/runs/{run_id}/decision", response_model=DecisionResult)
@@ -294,6 +412,7 @@ def decide(
 ) -> DecisionResult:
     """Record an approval, rejection, or requested vendor revision."""
 
+    _get_tenant_run(run_id, approver.tenant_id)
     if settings.mode == "aws":
         result = _decide_aws(run_id, decision, approver.subject)
     else:

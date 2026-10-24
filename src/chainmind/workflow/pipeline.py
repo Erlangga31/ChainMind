@@ -73,10 +73,10 @@ class DisruptionPipeline:
     def run(self, event: DisruptionEvent) -> DisruptionRun:
         """Execute the four agent stages and persist a draft awaiting approval."""
 
-        existing = self._store.get_by_idempotency_key(event.dedupe_key)
+        existing = self._store.get_by_idempotency_key(event.dedupe_key, event.tenant_id)
         if existing is not None:
             return existing
-        run = DisruptionRun(event=event)
+        run = DisruptionRun(event=event, tenant_id=event.tenant_id)
         self._store.save(run)
         try:
             self._transition(run, WorkflowState.MONITORING)
@@ -465,6 +465,19 @@ class DisruptionPipeline:
                 attempts=self._settings.retry_attempts,
                 base_delay_seconds=self._settings.retry_base_delay_seconds,
             )
+            monitoring_stage = next(
+                (stage for stage in run.stages if stage.name == "Monitoring"),
+                None,
+            )
+            draft_stage = next(
+                (stage for stage in run.stages if stage.name == "Orchestrator"),
+                None,
+            )
+            response_time_seconds = (
+                max((draft_stage.completed_at - monitoring_stage.completed_at).total_seconds(), 0)
+                if monitoring_stage is not None and draft_stage is not None
+                else None
+            )
             tracking, kpis = self._tracking.analyze(
                 sap_reference=run.draft_po.sap_reference,
                 ariba_reference=ariba_reference,
@@ -481,6 +494,7 @@ class DisruptionPipeline:
                 simulated=not (
                     self._settings.mode == "aws" and self._settings.resolved_sap_backend == "real"
                 ),
+                response_time_seconds=response_time_seconds,
             )
             self._sap.record_inventory_projection(tracking.inventory_projection)
         except ChainMindError as exc:
@@ -612,14 +626,18 @@ class DisruptionPipeline:
                 "Notification link action must be approve or view.",
                 status_code=422,
             )
-        self.get_run(run_id)
+        run = self.get_run(run_id)
         if self._notifications is None:
             raise ChainMindError(
                 "notifications_disabled",
                 "Notification links are not enabled.",
                 status_code=404,
             )
-        return self._notifications.create_link(run_id, action)
+        return self._notifications.create_link(
+            run_id,
+            action,
+            tenant_id=run.tenant_id,
+        )
 
     def _revise(self, run: DisruptionRun, decision: DecisionRequest) -> DecisionResult:
         if not decision.vendor_id:

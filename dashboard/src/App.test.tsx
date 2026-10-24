@@ -6,6 +6,7 @@ import { pendingRun } from "./test-fixtures";
 function makeJwt(role: "viewer" | "approver"): string {
   const claims = {
     sub: `demo-${role}`,
+    tenant_id: "demo",
     roles: [role],
     exp: Math.floor(Date.now() / 1000) + 300,
     nonce: "expected-nonce",
@@ -27,6 +28,24 @@ function installAuthenticatedFetch(role: "viewer" | "approver") {
         ? { access_token: "api-token", id_token: idToken }
         : url.endsWith("/health")
           ? { mode: "mock" }
+          : url.endsWith("/usage")
+            ? {
+                tenant_id: "demo",
+                period_start: "2026-10-01",
+                plan_tier: "Starter",
+                resolved_disruptions: 12,
+                included_disruptions: 10,
+                active_agents: 5,
+                included_agents: 4,
+                monthly_subscription_fee: 500,
+                disruption_overage_fee: 100,
+                additional_agent_fee: 100,
+                one_time_onboarding_fee: 1000,
+                illustrative_monthly_estimate: 700,
+                illustrative_first_invoice_estimate: 1700,
+                illustrative: true,
+                label: "Illustrative estimate only; not a quote or invoice.",
+              }
           : url.endsWith("/runs")
             ? [pendingRun]
             : pendingRun;
@@ -102,5 +121,20 @@ describe("OIDC-authenticated approval dashboard", () => {
       ),
     ).toBe(false);
     expect(screen.getByRole("button", { name: "Confirm decision" })).toBeDisabled();
+  });
+
+  it("shows usage and plan details only to approvers", async () => {
+    installAuthenticatedFetch("viewer");
+    const viewer = render(<App />);
+    await screen.findByRole("button", { name: "Disruptions" });
+    expect(screen.queryByRole("button", { name: "Usage & Plan" })).not.toBeInTheDocument();
+    viewer.unmount();
+
+    installAuthenticatedFetch("approver");
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Usage & Plan" }));
+
+    expect(await screen.findByText("Usage & Plan")).toBeInTheDocument();
+    expect(await screen.findByText("$1,700")).toBeInTheDocument();
   });
 });

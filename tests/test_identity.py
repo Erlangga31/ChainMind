@@ -44,6 +44,7 @@ def encode_token(private_key: Any, **claim_overrides: object) -> str:
         "iss": "https://issuer.example.test",
         "aud": "chainmind-dashboard",
         "sub": "approver-1",
+        "tenant_id": "factory-demo",
         "roles": ["approver"],
         "iat": now,
         "exp": now + timedelta(minutes=5),
@@ -62,6 +63,19 @@ def test_verifies_valid_rs256_access_token(
 
     assert user.subject == "approver-1"
     assert user.roles == frozenset({"approver"})
+    assert user.tenant_id == "factory-demo"
+
+
+def test_rejects_tokens_without_tenant_claim(
+    signing_material: tuple[Any, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    verifier, private_key = make_verifier(signing_material, monkeypatch)
+
+    with pytest.raises(HTTPException) as error:
+        verifier.verify(encode_token(private_key, tenant_id=None))
+
+    assert error.value.status_code == 401
 
 
 @pytest.mark.parametrize(

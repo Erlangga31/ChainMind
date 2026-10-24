@@ -31,8 +31,9 @@ Bedrock, Cognito/IAS, Teams/Slack/SES, SAP, atau SAP BTP telah diverifikasi seca
 | 8 — UX dan human-in-the-loop | Partial | [Dashboard](../dashboard/src/App.tsx), feed dengan sumber SAP, fake OIDC roles, signed links, modal konfirmasi, approve/reject/revise. | unit-tested dan Playwright E2E; omnichannel live dan SAP Business Workflow **needs real AWS or SAP**. |
 | 9 — keamanan, privasi, kepatuhan | Partial | JWT verification, RBAC, KMS, private endpoints, encrypted/versioned S3, CloudTrail, audit, cdk-nag, API throttling. | Unit-tested dan synth-only; IAM review, VPC flow logs/WAF, account controls, privacy/compliance certification **needs real AWS or SAP**. |
 | 10 — competitive position | Partial | Klaim dan pembeda dirangkum sebagai proposisi dalam [pitch](./PITCH.md); tidak ada benchmark produk pesaing. | Documentation-only; validasi pasar dan klaim kompetitif belum dilakukan. |
-| 11 — model bisnis dan target pasar | Partial | Target buyer/operator, langganan SaaS bertier, onboarding, dan distribusi potensial dalam [BUSINESS.md](./BUSINESS.md). | Documentation-only; harga, marketplace listing, dan willingness-to-pay TBD. |
-| 12 — dampak/KPI | Partial | `GET /kpis`, model KPI dan tampilan dashboard. Proposal mengusulkan respons menit, mitigasi proaktif, beban kerja procurement lebih ringan, serta keputusan konsisten. | unit-tested; angka dan savings dashboard adalah ilustratif, target proposal perlu pilot, **needs real SAP**. |
+| 11 — model bisnis dan target pasar | Partial | Target buyer/operator, tier usage demo, onboarding, dan distribusi potensial dalam [BUSINESS.md](./BUSINESS.md) dan [MARKETPLACE.md](./MARKETPLACE.md). | unit-tested metering; pricing defaults illustrative; marketplace listing and willingness-to-pay TBD. |
+| 12 — dampak/KPI | Implemented (local comparison) | `GET /kpis`, timestamp response measurement, repeated-scenario decision-consistency metric, and dashboard comparison. | unit-tested; manual baselines/workload targets illustrative; no production/SAP measurement. |
+| Tenant metering and isolation | Implemented (local scaffold) | Tenant JWT claim, tenant-scoped run/idempotency/KPI/current-month usage routes, per-tenant plan/agent overrides, role-gated usage page. | unit-tested; tenant provisioning, billing integration, and production isolation review **need real AWS or SAP**. |
 | 13 — roadmap MVP enam minggu | Partial | Sandbox, API, agents, UI, notifikasi, demo dan testing dijabarkan di [DEMO.md](./DEMO.md). | Implementasi mock lokal terverifikasi; pilot BTP dan runtime layanan nyata belum dikerjakan. |
 | 15 — risiko dan mitigasi | Partial | Risiko salah pilih agen, adopsi, kompleksitas SAP, ketergantungan Bedrock, dan perubahan API dicatat di [BUSINESS.md](./BUSINESS.md). | Documentation-only, cdk-nag synth-only; bukan threat model atau security certification formal. |
 | 16 — pendanaan/sumber daya | Partial | Kategori biaya AWS/SAP, kapasitas tim, dan user validation placeholders tersedia di [BUSINESS.md](./BUSINESS.md). | Tidak ada harga, budget, atau estimasi aktual; semua masih TBD. |
@@ -43,15 +44,15 @@ Bedrock, Cognito/IAS, Teams/Slack/SES, SAP, atau SAP BTP telah diverifikasi seca
 | --- | --- | --- | --- |
 | Amazon Bedrock Agents | Partial | [Bedrock clients/agents](../src/chainmind/integrations/llm/), empat Agents, Action Groups dan Guardrail di [CDK](../infra/chainmind_stack.py). Mode default `mock`. | unit-tested, synth-only; real model access **needs real AWS**. |
 | AWS Lambda | Implemented (package scaffold) | [Lambda handlers](../src/chainmind/handlers/), [package builder](../infra/lambda_package.py), asset Python 3.12 Linux x86_64. | unit-tested asset content, synth-only; belum dideploy. |
-| Amazon EventBridge | Partial | Event bus/rules pada [CDK](../infra/chainmind_stack.py), Event Mesh bridge handler, [LocalStack test](../tests/integration/test_localstack_services.py). | unit-tested, synth-only; LocalStack CI run pending; production delivery **needs real AWS**. |
-| AWS Step Functions | Partial | State machine, callback approval, Retry/Catch, DLQ dan tracing pada [CDK](../infra/chainmind_stack.py); task-token test di [LocalStack suite](../tests/integration/test_localstack_services.py). | unit-tested, synth-only; LocalStack CI run pending; production callback **needs real AWS**. |
+| Amazon EventBridge | Partial | Event bus/rules pada [CDK](../infra/chainmind_stack.py), Event Mesh bridge handler, [LocalStack test](../tests/integration/test_localstack_services.py). | LocalStack-verified event API and handler logic in CI; Lambda event-source invocation synth-only; production delivery **needs real AWS**. |
+| AWS Step Functions | Partial | State machine, callback approval, Retry/Catch, DLQ dan tracing pada [CDK](../infra/chainmind_stack.py); task-token test di [LocalStack suite](../tests/integration/test_localstack_services.py). | LocalStack-verified callback API in CI; production callback **needs real AWS**. |
 | Amazon API Gateway | Partial | REST API, Cognito authorizer, throttling, signed notification routes pada [CDK](../infra/chainmind_stack.py). | synth-only; deployed API **needs real AWS**. |
-| Amazon S3 | Partial | Encrypted/versioned audit-artifact bucket, block public access di [CDK](../infra/chainmind_stack.py); run audit/trace archive integration test. | unit-tested, synth-only; LocalStack CI run pending; production writes **needs real AWS**. |
+| Amazon S3 | Partial | Encrypted/versioned audit-artifact bucket, block public access di [CDK](../infra/chainmind_stack.py); run audit/trace archive integration test. | LocalStack-verified archive API in CI; production writes **needs real AWS**. |
 | Amazon CloudWatch | Partial | Log groups, alarms, dashboard, API access logs pada [CDK](../infra/chainmind_stack.py). | synth-only; production telemetry **needs real AWS**. |
-| Amazon DynamoDB | Partial | Idempotency/event ledger dan run store; LocalStack integration tests. | unit-tested; LocalStack CI run pending; account controls **needs real AWS**. |
-| Amazon SQS | Partial | Workflow DLQ in CDK and LocalStack queue integration test. | unit-tested, synth-only; LocalStack CI run pending; production redrive policy **needs real AWS**. |
-| AWS Secrets Manager | Partial | Secret reads in handlers/factory and LocalStack read test. | unit-tested; LocalStack CI run pending; secret rotation **needs real AWS**. |
-| Amazon SES | Partial | Email adapter and LocalStack send test (no external email delivery). | unit-tested; LocalStack CI run pending; identity verification/delivery **needs real AWS**. |
+| Amazon DynamoDB | Partial | Idempotency/event ledger dan run store; LocalStack integration tests. | LocalStack-verified API behavior in CI; account controls **needs real AWS**. |
+| Amazon SQS | Partial | Workflow DLQ in CDK and LocalStack queue integration test. | LocalStack-verified queue API in CI; production redrive policy **needs real AWS**. |
+| AWS Secrets Manager | Partial | Secret reads in handlers/factory and LocalStack read test. | LocalStack-verified secret read in CI; secret rotation **needs real AWS**. |
+| Amazon SES | Partial | Email adapter and LocalStack send test (no external email delivery). | LocalStack-verified SES API in CI; identity verification/delivery **needs real AWS**. |
 | AWS IAM dan AWS KMS | Partial | CMK, Lambda roles, grants, encrypted DynamoDB/S3/SQS/Secrets dan VPC policies pada [CDK](../infra/chainmind_stack.py). | CDK assertions, synth-only; account-level IAM validation **needs real AWS**. |
 | SAP S/4HANA | Partial (mock) | [S/4HANA client](../src/chainmind/integrations/sap/real_clients.py), OData V2 sandbox/EDMX pada [sandbox](../sandbox/sap_sandbox/main.py), JSON Schemas di [`contracts/sap/`](../contracts/sap/), opt-in [tenant verifier](../scripts/verify_sap_tenant.py). | contract tests and sandbox-verified; live tenant smoke **needs real SAP**. |
 | SAP Ariba Network | Partial (mock/custom adapter) | [Ariba client](../src/chainmind/integrations/sap/real_clients.py), ChainMind Integration Suite adapter contract/EDMX and vendor offers/PO/confirmation/ASN sandbox. | contract tests and sandbox-verified; live supplier network **needs real SAP**. |
@@ -89,14 +90,12 @@ Bedrock, Cognito/IAS, Teams/Slack/SES, SAP, atau SAP BTP telah diverifikasi seca
 
 ## Validasi dan batas deployment
 
-CI pada SHA phase 17 `29820b4` hijau; phase 18 LocalStack workflow is added and its result is pending.
-Validasi lokal saat audit ini: backend **113 passed**, dashboard
-**8 passed**, Playwright **6 passed**, Ruff lint/format lulus, dashboard production build dan E2E
-typecheck lulus, serta CDK synth + AwsSolutions checks lulus. `npm audit` tidak menemukan kerentanan;
-`pip-audit` terhadap locked runtime requirements juga tidak menemukan kerentanan yang diketahui;
-secret-pattern scan atas source/docs menemukan **0 hit**. Docker Compose config tidak dapat divalidasi
-lokal karena Docker CLI/Engine tidak tersedia pada Windows; job CI yang menyediakan Docker menjadi
-validator.
+CI commit `a099784` hijau, termasuk LocalStack integration job. Itu memverifikasi layanan simulator,
+bukan invocation Lambda melalui event-source mapping, dan bukan AWS nyata. Validasi lokal Phase 20:
+backend **131 passed, 9 skipped**, dashboard **10 passed**, Playwright **6 passed**, production/E2E
+TypeScript build lulus, Ruff lulus, 8 CDK assertion tests lulus, dan `cdk synth` lulus. Docker Compose
+config tidak dapat divalidasi lokal karena Docker CLI/Engine tidak tersedia di Windows. Audit
+dependency dan secret scan final belum dijalankan untuk perubahan Phase 20.
 
 CDK synth menargetkan Python 3.12 Linux x86_64 dan memaketkan dependencies. Synthesis tidak membuktikan
 asset dijalankan Lambda. Suppressions cdk-nag yang ada memiliki alasan tertulis; review akun target,

@@ -30,6 +30,7 @@ class TrackingAgent:
         cost_of_inaction: float,
         estimated_stockout_days: float,
         simulated: bool,
+        response_time_seconds: float | None = None,
         today: date | None = None,
     ) -> tuple[ExecutionTracking, RunKPI]:
         """Calculate arrival deviation, projected coverage, and illustrative economics."""
@@ -83,5 +84,6 @@ class TrackingAgent:
             estimated_stockout_days_avoided=(
                 estimated_stockout_days if line_stoppage_avoided else 0
             ),
+            response_time_seconds=response_time_seconds,
         )
         return tracking, kpis

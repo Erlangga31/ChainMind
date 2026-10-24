@@ -4,10 +4,11 @@ import {
   AuditViewer,
   ImpactPanel,
   KpiCards,
+  UsageCard,
   VendorCharts,
   WorkflowTimeline,
 } from "./components";
-import type { ApiError, DisruptionRun, KPIReport } from "./types";
+import type { ApiError, DisruptionRun, KPIReport, UsageReport } from "./types";
 
 const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 const OIDC_ISSUER = import.meta.env.VITE_OIDC_ISSUER ?? "http://127.0.0.1:8100";
@@ -52,6 +53,7 @@ type TokenClaims = {
   sub: string;
   roles?: string[];
   "cognito:groups"?: string[];
+  tenant_id: string;
   exp: number;
   nonce?: string;
 };
@@ -59,7 +61,7 @@ type TokenClaims = {
 type AuthSession = {
   token: string;
   subject: string;
-  role: "viewer" | "approver";
+  role: "viewer" | "approver" | "admin";
   expiresAt: number;
 };
 
@@ -161,9 +163,11 @@ export default function App() {
   const [revisionVendorId, setRevisionVendorId] = useState("");
   const [scenarioId, setScenarioId] = useState<(typeof SCENARIOS)[number]["id"]>("weather");
   const role = session?.role;
-  const [page, setPage] = useState<"runs" | "kpis">("runs");
+  const canApprove = role === "approver" || role === "admin";
+  const [page, setPage] = useState<"runs" | "kpis" | "usage">("runs");
   const [apiMode, setApiMode] = useState("mock");
   const [kpis, setKpis] = useState<KPIReport | null>(null);
+  const [usage, setUsage] = useState<UsageReport | null>(null);
   const [pendingDecision, setPendingDecision] = useState<"approve" | "reject" | "revise" | null>(null);
   const [decisionConfirmed, setDecisionConfirmed] = useState(false);
   const [notificationToken, setNotificationToken] = useState("");
@@ -173,6 +177,9 @@ export default function App() {
   onSessionExpired = () => {
     accessToken = null;
     setSession(null);
+    setPage("runs");
+    setUsage(null);
+    setKpis(null);
     setError("Your session expired. Sign in again to continue.");
   };
 
@@ -213,13 +220,20 @@ export default function App() {
         if (claims.nonce !== nonce || claims.exp <= Date.now() / 1000) {
           throw new Error("The identity token expired or failed nonce validation.");
         }
-        if (!roles.includes("viewer") && !roles.includes("approver")) {
+        if (!claims.tenant_id) {
+          throw new Error("The identity token does not contain a tenant claim.");
+        }
+        if (!roles.includes("viewer") && !roles.includes("approver") && !roles.includes("admin")) {
           throw new Error("The identity token does not contain a supported role.");
         }
         const nextSession = {
           token: identityToken,
           subject: claims.sub,
-          role: roles.includes("approver") ? "approver" : "viewer",
+          role: roles.includes("admin")
+            ? "admin" as const
+            : roles.includes("approver")
+              ? "approver" as const
+              : "viewer" as const,
           expiresAt: claims.exp * 1000,
         } satisfies AuthSession;
         accessToken = nextSession.token;
@@ -304,6 +318,15 @@ export default function App() {
       });
   }, [page, session]);
 
+  useEffect(() => {
+    if (!session || page !== "usage" || !canApprove) return;
+    void request<UsageReport>("/usage")
+      .then(setUsage)
+      .catch((caught: unknown) => {
+        setError(caught instanceof Error ? caught.message : "Could not load usage data.");
+      });
+  }, [canApprove, page, session]);
+
   const feasibleVendors = useMemo(
     () => run?.vendor_comparison.filter((evaluation) => evaluation.feasible) ?? [],
     [run],
@@ -372,7 +395,7 @@ export default function App() {
   }
 
   async function confirmDecision() {
-    if (!run || !pendingDecision || !decisionConfirmed || role !== "approver") return;
+    if (!run || !pendingDecision || !decisionConfirmed || !canApprove) return;
     if (!run) return;
     setBusy(true);
     setError("");
@@ -412,6 +435,9 @@ export default function App() {
     setRuns([]);
     setRun(null);
     setSelectedId("");
+    setPage("runs");
+    setUsage(null);
+    setKpis(null);
     setError("");
   }
 
@@ -515,7 +541,7 @@ export default function App() {
                     <div className="flex gap-2">
                       <button
                         className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-                        disabled={busy || role !== "approver"}
+                        disabled={busy || !canApprove}
                         onClick={() => void openNotificationApproval(item.run_id)}
                       >
                         Approve
@@ -537,10 +563,15 @@ export default function App() {
         <nav className="flex gap-2" aria-label="Dashboard sections">
           <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "runs" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("runs")}>Disruptions</button>
           <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "kpis" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("kpis")}>KPIs</button>
+          {canApprove && (
+            <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "usage" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("usage")}>Usage &amp; Plan</button>
+          )}
         </nav>
 
         {page === "kpis" ? (
           kpis ? <KpiCards report={kpis} /> : <div className="rounded-xl bg-white p-6 text-slate-500">Loading KPI data…</div>
+        ) : page === "usage" ? (
+          usage ? <UsageCard report={usage} /> : <div className="rounded-xl bg-white p-6 text-slate-500">Loading usage data…</div>
         ) : (
         <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
           <aside className="h-fit rounded-2xl bg-white p-4 shadow-card">
@@ -666,7 +697,7 @@ export default function App() {
                           {run.draft_po.sap_reference && <p className="col-span-2 text-slate-500">SAP reference <strong className="block text-ink">{run.draft_po.sap_reference}</strong></p>}
                         </div>
                       </div>
-                      {pending && role === "approver" && (
+                      {pending && canApprove && (
                         <div className="mt-4 space-y-3">
                           <label className="block text-sm font-medium text-slate-700">Decision note
                             <input className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" value={decisionNote} onChange={(event) => setDecisionNote(event.target.value)} placeholder="Optional note for the audit record" />
@@ -685,7 +716,7 @@ export default function App() {
                           <p className="text-xs leading-5 text-slate-500">Approve executes the PO in the configured SAP adapter. Reject and revise do not execute a purchase.</p>
                         </div>
                       )}
-                      {pending && role === "viewer" && <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Viewer access is read-only. Sign in with an approver account to submit a decision.</p>}
+                      {pending && !canApprove && <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Viewer access is read-only. Sign in with an approver account to submit a decision.</p>}
                     </>
                   ) : <p className="mt-4 text-sm text-slate-500">No purchase order was created for this run.</p>}
                 </section>

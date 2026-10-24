@@ -21,12 +21,13 @@ class EventBridgePublisher:
     def publish(self, event: DisruptionEvent) -> tuple[UUID, bool]:
         """Publish once and return the canonical event ID plus whether it was new."""
 
-        record_id = f"event#{hashlib.sha256(event.dedupe_key.encode()).hexdigest()}"
+        record_id = event_record_id(event)
         try:
             self._table.put_item(
                 Item={
                     "run_id": record_id,
                     "event_key": event.dedupe_key,
+                    "tenant_id": event.tenant_id,
                     "event_id": str(event.event_id),
                     "event_status": "PUBLISHING",
                 },
@@ -101,10 +102,11 @@ class EventBridgePublisher:
 def event_record_id(event: DisruptionEvent) -> str:
     """Return the deterministic DynamoDB partition key used by the event ledger."""
 
-    return event_record_id_for_key(event.dedupe_key)
+    return event_record_id_for_key(event.dedupe_key, event.tenant_id)
 
 
-def event_record_id_for_key(key: str) -> str:
+def event_record_id_for_key(key: str, tenant_id: str = "demo") -> str:
     """Return a ledger key when only the external idempotency key is available."""
 
-    return f"event#{hashlib.sha256(key.encode()).hexdigest()}"
+    scoped_key = key if tenant_id == "demo" else f"{tenant_id}:{key}"
+    return f"event#{hashlib.sha256(scoped_key.encode()).hexdigest()}"

@@ -122,6 +122,34 @@ export interface KPIReport {
   illustrative_cost_of_inaction: number;
   illustrative_action_cost: number;
   illustrative_savings: number;
+  comparison: KPIComparison[];
+}
+
+export interface KPIComparison {
+  metric: string;
+  unit: string;
+  manual_baseline: number | null;
+  chainmind_value: number | null;
+  manual_is_illustrative: boolean;
+  chainmind_is_illustrative: boolean;
+}
+
+export interface UsageReport {
+  tenant_id: string;
+  period_start: string;
+  plan_tier: "Starter" | "Professional" | "Enterprise";
+  resolved_disruptions: number;
+  included_disruptions: number;
+  active_agents: number;
+  included_agents: number;
+  monthly_subscription_fee: number;
+  disruption_overage_fee: number;
+  additional_agent_fee: number;
+  one_time_onboarding_fee: number;
+  illustrative_monthly_estimate: number;
+  illustrative_first_invoice_estimate: number;
+  illustrative: boolean;
+  label: string;
 }
 
 export interface ApiError {

@@ -23,13 +23,21 @@ class NotificationLinkSigner:
         self._secret = secret.encode("utf-8")
         self._ttl_seconds = ttl_minutes * 60
 
-    def create(self, run_id: UUID, action: str, *, now: int | None = None) -> str:
+    def create(
+        self,
+        run_id: UUID,
+        action: str,
+        *,
+        tenant_id: str = "demo",
+        now: int | None = None,
+    ) -> str:
         """Create a URL-safe signed token scoped to ``approve`` or ``view``."""
 
         if action not in {"approve", "view"}:
             raise ValueError("Notification link action must be approve or view.")
         payload = NotificationLinkPayload(
             run_id=run_id,
+            tenant_id=tenant_id,
             action=action,
             expires_at=(now if now is not None else int(time.time())) + self._ttl_seconds,
         )

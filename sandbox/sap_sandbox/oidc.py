@@ -173,6 +173,7 @@ def add_oidc_routes(
             "iss": normalized_issuer,
             "aud": audience,
             "sub": code.subject,
+            "tenant_id": "demo",
             "roles": code.roles,
             "iat": now,
             "exp": now + timedelta(minutes=15),

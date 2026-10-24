@@ -18,7 +18,7 @@ class RunStore(Protocol):
     def get(self, run_id: UUID) -> DisruptionRun | None:
         """Retrieve one run snapshot."""
 
-    def get_by_idempotency_key(self, key: str) -> DisruptionRun | None:
+    def get_by_idempotency_key(self, key: str, tenant_id: str = "demo") -> DisruptionRun | None:
         """Retrieve the existing run for an already processed event key."""
 
     def list(self) -> list[DisruptionRun]:
@@ -30,7 +30,7 @@ class EventStore:
 
     def __init__(self) -> None:
         self._runs: dict[UUID, DisruptionRun] = {}
-        self._keys: dict[str, UUID] = {}
+        self._keys: dict[tuple[str, str], UUID] = {}
         self._lock = RLock()
 
     def save(self, run: DisruptionRun) -> None:
@@ -38,7 +38,7 @@ class EventStore:
 
         with self._lock:
             self._runs[run.run_id] = run.model_copy(deep=True)
-            self._keys[run.event.dedupe_key] = run.run_id
+            self._keys[(run.tenant_id, run.event.dedupe_key)] = run.run_id
 
     def get(self, run_id: UUID) -> DisruptionRun | None:
         """Retrieve one run without exposing mutable store state."""
@@ -57,11 +57,11 @@ class EventStore:
                 reverse=True,
             )
 
-    def get_by_idempotency_key(self, key: str) -> DisruptionRun | None:
+    def get_by_idempotency_key(self, key: str, tenant_id: str = "demo") -> DisruptionRun | None:
         """Retrieve a run by its external-event idempotency key."""
 
         with self._lock:
-            run_id = self._keys.get(key)
+            run_id = self._keys.get((tenant_id, key))
             run = self._runs.get(run_id) if run_id else None
             return run.model_copy(deep=True) if run else None
 
@@ -87,6 +87,17 @@ class SQLiteEventStore:
                 )
                 """
             )
+            rows = self._connection.execute(
+                "SELECT run_id, idempotency_key, run_data FROM runs"
+            ).fetchall()
+            for row in rows:
+                run = DisruptionRun.model_validate_json(row["run_data"])
+                scoped_key = _idempotency_storage_key(run.event.dedupe_key, run.tenant_id)
+                if row["idempotency_key"] != scoped_key:
+                    self._connection.execute(
+                        "UPDATE runs SET idempotency_key = ? WHERE run_id = ?",
+                        (scoped_key, row["run_id"]),
+                    )
 
     def save(self, run: DisruptionRun) -> None:
         """Persist or update a JSON-serialized run snapshot."""
@@ -104,7 +115,7 @@ class SQLiteEventStore:
                 (
                     str(run.run_id),
                     run.created_at.isoformat(),
-                    run.event.dedupe_key,
+                    _idempotency_storage_key(run.event.dedupe_key, run.tenant_id),
                     run.model_dump_json(),
                 ),
             )
@@ -118,12 +129,13 @@ class SQLiteEventStore:
             ).fetchone()
         return DisruptionRun.model_validate_json(row["run_data"]) if row else None
 
-    def get_by_idempotency_key(self, key: str) -> DisruptionRun | None:
+    def get_by_idempotency_key(self, key: str, tenant_id: str = "demo") -> DisruptionRun | None:
         """Retrieve an existing run using its unique event key."""
 
         with self._lock:
             row = self._connection.execute(
-                "SELECT run_data FROM runs WHERE idempotency_key = ?", (key,)
+                "SELECT run_data FROM runs WHERE idempotency_key = ?",
+                (_idempotency_storage_key(key, tenant_id),),
             ).fetchone()
         return DisruptionRun.model_validate_json(row["run_data"]) if row else None
 
@@ -141,3 +153,9 @@ class SQLiteEventStore:
 
         with self._lock:
             self._connection.close()
+
+
+def _idempotency_storage_key(key: str, tenant_id: str) -> str:
+    """Scope an otherwise external event key to its owning tenant."""
+
+    return f"{tenant_id}:{key}"

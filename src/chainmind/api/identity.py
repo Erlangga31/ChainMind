@@ -20,6 +20,7 @@ class AuthenticatedUser:
 
     subject: str
     roles: frozenset[str]
+    tenant_id: str = "demo"
 
 
 class OIDCVerifier:
@@ -56,7 +57,18 @@ class OIDCVerifier:
                 detail="Bearer token contains invalid role claims.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        return AuthenticatedUser(subject=str(claims["sub"]), roles=frozenset(raw_roles))
+        tenant_id = claims.get("tenant_id", claims.get("custom:tenant_id"))
+        if not isinstance(tenant_id, str) or not tenant_id.strip():
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="The identity token has no valid tenant claim.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return AuthenticatedUser(
+            subject=str(claims["sub"]),
+            roles=frozenset(raw_roles),
+            tenant_id=tenant_id,
+        )
 
 
 def get_oidc_verifier() -> OIDCVerifier:
@@ -92,14 +104,45 @@ def authenticated_user(
     return verifier.verify(credentials.credentials)
 
 
+def tenant_context(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    verifier: Annotated[OIDCVerifier, Depends(get_oidc_verifier)],
+) -> AuthenticatedUser:
+    """Resolve a tenant from a verified JWT; unauthenticated local mock stays in demo tenant."""
+
+    if credentials is None:
+        if settings.mode == "mock":
+            return AuthenticatedUser(subject="anonymous-local", roles=frozenset(), tenant_id="demo")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="A bearer token is required.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return verifier.verify(credentials.credentials)
+
+
 def require_approver(
     user: Annotated[AuthenticatedUser, Depends(authenticated_user)],
 ) -> AuthenticatedUser:
     """Require the verified approver role for financial decisions."""
 
-    if "approver" not in user.roles:
+    if not user.roles.intersection({"approver", "admin"}):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="The approver role is required for this action.",
+            detail="The approver or admin role is required for this action.",
+        )
+    return user
+
+
+def require_usage_access(
+    user: Annotated[AuthenticatedUser, Depends(authenticated_user)],
+) -> AuthenticatedUser:
+    """Require approver or admin access for tenant billing and usage metrics."""
+
+    if not user.roles.intersection({"approver", "admin"}):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The approver or admin role is required for usage data.",
         )
     return user

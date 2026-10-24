@@ -102,9 +102,14 @@ uv run uvicorn chainmind.api.main:app --app-dir src --reload
 
 API tersedia di `http://localhost:8000`; OpenAPI UI di `http://localhost:8000/docs`.
 Endpoint utama mencakup `POST /disruptions`, `GET /runs`, `GET /runs/{run_id}`,
-`POST /runs/{run_id}/decision`, dan `GET /kpis`. KPI mengagregasi run yang sudah selesai
-tracking; biaya dan savings ditandai simulasi/ilustratif, bukan proyeksi finansial.
-Keputusan membutuhkan bearer token OIDC dengan role `approver`; role tidak pernah dipilih melalui header. Bypass lokal hanya tersedia dengan `CHAINMIND_AUTH_DEV_BYPASS=true` saat `CHAINMIND_MODE=mock`, dan tetap mati secara default.
+`POST /runs/{run_id}/decision`, `GET /kpis`, dan `GET /usage`. JWT harus membawa claim tenant
+`tenant_id` (atau `custom:tenant_id`); run, idempotency, KPI, dan metering terisolasi per tenant.
+`GET /usage` memerlukan role `approver` atau `admin`; keputusan PO memerlukan `approver` atau `admin`.
+Usage menghitung run `EXECUTED` pada bulan UTC berjalan; tier dan jumlah agen dapat ditetapkan per tenant.
+Tier dan harga di konfigurasi adalah ilustratif, bukan penawaran komersial atau invoice.
+KPI mengagregasi run yang sudah selesai tracking; target manual dan estimasi beban kerja diberi label
+ilustratif. Role tidak pernah dipilih melalui header. Bypass lokal hanya tersedia dengan
+`CHAINMIND_AUTH_DEV_BYPASS=true` saat `CHAINMIND_MODE=mock`, dan tetap mati secara default.
 
 ### Fake OIDC provider
 
@@ -321,8 +326,9 @@ Berdasarkan proposal lokal di `docs/reference/ChainMind_Proposal.pdf`, matriks b
 | 8 — notifikasi dan human approval | Implemented | [notification adapters](./src/chainmind/notifications/), [dashboard approval flow](./dashboard/src/) | unit-tested, Playwright, mock channels |
 | 9 — keamanan/operations | Partial | [JWT validation](./src/chainmind/api/), [CDK stack](./infra/chainmind_stack.py), [DEPLOY.md](./docs/DEPLOY.md) | synth-only; no live AWS/security certification |
 | 10 — dashboard/demo | Implemented | [dashboard](./dashboard/src/), [demo guide](./docs/DEMO.md), [screenshots](./docs/screenshots/) | unit-tested, build, Playwright |
-| 11 — model bisnis | Partial | [business draft](./docs/BUSINESS.md) | documentation-only, assumptions TBD |
-| 12 — KPI framework | Implemented | [KPI API](./src/chainmind/api/main.py), [KPI models](./src/chainmind/core/models.py), [dashboard KPI page](./dashboard/src/) | unit-tested; illustrative only |
+| 11 — model bisnis | Partial | [business draft](./docs/BUSINESS.md), [marketplace packaging notes](./docs/MARKETPLACE.md) | usage-metering unit-tested; pricing/marketplace assumptions TBD |
+| 12 — KPI framework | Implemented (illustrative baselines) | [KPI API](./src/chainmind/api/main.py), [KPI models](./src/chainmind/core/models.py), [dashboard KPI page](./dashboard/src/) | unit-tested; run response time measured locally, comparison targets illustrative |
+| Tenant metering | Implemented (local scaffold) | [tenant auth](./src/chainmind/api/identity.py), [usage API](./src/chainmind/api/main.py), [usage page](./dashboard/src/components.tsx) | unit-tested; pricing defaults illustrative, no billing integration |
 | 13 — roadmap implementasi dan MVP | Partial | [demo guide](./docs/DEMO.md), [coverage audit](./docs/COVERAGE.md) | demo/sandbox verified; SAP BTP pilot remains a prerequisite |
 | 15 — risk | Partial | [risk register draft](./docs/BUSINESS.md) | documentation-only |
 | 16 — pendanaan / placeholders | Partial | [business draft](./docs/BUSINESS.md) | placeholders; no validated budget |

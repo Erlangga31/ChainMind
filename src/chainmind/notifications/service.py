@@ -64,8 +64,16 @@ class NotificationService:
         else:
             raise ValueError(f"Unsupported notification event: {event_kind}")
 
-        approve_token = self._signer.create(run.run_id, "approve")
-        view_token = self._signer.create(run.run_id, "view")
+        approve_token = self._signer.create(
+            run.run_id,
+            "approve",
+            tenant_id=run.tenant_id,
+        )
+        view_token = self._signer.create(
+            run.run_id,
+            "view",
+            tenant_id=run.tenant_id,
+        )
         approve_url = f"{self._dashboard_url}/?approve={approve_token}"
         view_url = f"{self._api_base_url}/notifications/links/{view_token}"
         message = NotificationMessage(
@@ -94,10 +102,16 @@ class NotificationService:
 
         return self._signer.validate(token)
 
-    def create_link(self, run_id: UUID, action: Literal["approve", "view"]) -> str:
+    def create_link(
+        self,
+        run_id: UUID,
+        action: Literal["approve", "view"],
+        *,
+        tenant_id: str = "demo",
+    ) -> str:
         """Create a scoped signed link for an existing run."""
 
-        return self._signer.create(run_id, action)
+        return self._signer.create(run_id, action, tenant_id=tenant_id)
 
     @staticmethod
     def audit_summary(message: NotificationMessage) -> str:

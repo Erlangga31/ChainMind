@@ -1,10 +1,50 @@
 """Environment-backed application configuration."""
 
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class UsagePricingTier(BaseModel):
+    """Illustrative metering prices configurable through ChainMind settings."""
+
+    monthly_fee: float = Field(ge=0)
+    included_disruptions: int = Field(ge=0)
+    included_agents: int = Field(ge=0)
+    extra_disruption_fee: float = Field(ge=0)
+    extra_agent_fee: float = Field(ge=0)
+    onboarding_fee: float = Field(ge=0)
+
+
+def _default_usage_pricing() -> dict[str, UsagePricingTier]:
+    return {
+        "Starter": UsagePricingTier(
+            monthly_fee=500,
+            included_disruptions=10,
+            included_agents=4,
+            extra_disruption_fee=50,
+            extra_agent_fee=100,
+            onboarding_fee=1_000,
+        ),
+        "Professional": UsagePricingTier(
+            monthly_fee=2_500,
+            included_disruptions=100,
+            included_agents=4,
+            extra_disruption_fee=25,
+            extra_agent_fee=75,
+            onboarding_fee=5_000,
+        ),
+        "Enterprise": UsagePricingTier(
+            monthly_fee=10_000,
+            included_disruptions=1_000,
+            included_agents=5,
+            extra_disruption_fee=10,
+            extra_agent_fee=50,
+            onboarding_fee=15_000,
+        ),
+    }
 
 
 class Settings(BaseSettings):
@@ -66,6 +106,13 @@ class Settings(BaseSettings):
     sap_secrets_secret_id: str | None = None
     sap_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
     sap_workflow_base_url: str = "http://127.0.0.1:8100"
+    usage_plan_tier: Literal["Starter", "Professional", "Enterprise"] = "Starter"
+    usage_active_agents: int = Field(default=5, ge=0)
+    usage_tenant_plan_tiers: dict[str, Literal["Starter", "Professional", "Enterprise"]] = Field(
+        default_factory=dict
+    )
+    usage_tenant_active_agents: dict[str, Annotated[int, Field(ge=0)]] = Field(default_factory=dict)
+    usage_pricing_tiers: dict[str, UsagePricingTier] = Field(default_factory=_default_usage_pricing)
 
     @property
     def resolved_sap_backend(self) -> Literal["mock", "sandbox", "real"]:

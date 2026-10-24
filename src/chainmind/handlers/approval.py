@@ -51,6 +51,7 @@ def _persist_waiting_run(
     run = DisruptionRun(
         run_id=run_id,
         event=event,
+        tenant_id=event.tenant_id,
         status=RunStatus.PENDING_APPROVAL,
         workflow_state=WorkflowState.HUMAN_APPROVAL,
         revision_count=revision_count,

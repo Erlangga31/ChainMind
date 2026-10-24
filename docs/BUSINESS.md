@@ -30,21 +30,29 @@ Proposal mengusulkan **B2B Enterprise SaaS** dengan:
 Tidak ada harga atau listing marketplace yang telah ditetapkan. Nilai kontrak, batas tiap tier, biaya
 implementasi, SLA, dan willingness-to-pay perlu divalidasi. Demo/sandbox bukan tier komersial.
 
+API demo menyediakan tier Starter, Professional, dan Enterprise dengan nilai default yang hanya
+berfungsi sebagai ilustrasi konfigurasi. Plan tier dan jumlah agen dapat dioverride per tenant;
+metering menghitung run `EXECUTED` pada bulan UTC berjalan, overage, biaya dasar, dan onboarding
+satu kali per tenant. Tidak ada
+Marketplace Metering API, pembayaran, atau invoice komersial yang terhubung; angka harus diganti dan
+disetujui sebelum dipakai untuk keputusan bisnis.
+
 ## Dampak dan kerangka KPI
 
 Proposal menargetkan empat area berikut. Targetnya bersifat **ilustratif** dan perlu pilot dengan data
-SAP pelanggan; nilai `GET /kpis` saat ini dihitung dari fixture demo, bukan hasil pengukuran aktual.
+SAP pelanggan; beberapa nilai `GET /kpis` dihitung dari run lokal/simulated, bukan operasi produksi.
 
 | Area dampak | Baseline hipotesis pada proposal | Target/arah yang diusulkan | Implementasi saat ini |
 | --- | --- | --- | --- |
-| Waktu respons gangguan | Berhari-hari untuk analisis manual lintas sistem | Hitungan menit dari event hingga draf solusi siap ditinjau | Alur mock berjalan lokal; latency belum menjadi KPI terukur. |
+| Waktu respons gangguan | Berhari-hari untuk analisis manual lintas sistem | Hitungan menit dari event hingga draf solusi siap ditinjau | API menghitung interval stage deteksi ke stage draf dari timestamp pipeline lokal; bukan SLA/latency AWS. |
 | Risiko line-stoppage | Reaktif, berisiko terlambat mencegah stockout | Mitigasi proaktif sebelum stok utama habis | Stockout dan biaya inaction dihitung deterministik dari fixture; hasil nyata belum divalidasi. |
 | Beban kerja procurement | Waktu habis untuk firefighting | Lebih banyak fokus pada negosiasi strategis dan hubungan vendor | Perbandingan vendor mock; penghematan jam kerja belum diukur. |
 | Kualitas keputusan mitigasi | Rentan bias dan tekanan waktu | Keputusan konsisten dari kalkulasi data komprehensif | Perhitungan ekonomi deterministic; rekomendasi dan savings tidak membuktikan kualitas produksi. |
 
-KPI dashboard mencakup tracked/executed runs, line stoppages avoided, biaya aksi/inaction ilustratif,
-dan savings ilustratif. Pilot perlu mendefinisikan baseline, formula, sumber data, pemilik, periode,
-tingkat override, serta false-positive rate bersama pelanggan.
+KPI dashboard membandingkan baseline manual ilustratif dengan metrik ChainMind dari run lokal jika
+tersedia (waktu respons, line-stoppage risk teramati, dan konsistensi vendor terpilih). Beban kerja
+procurement serta baseline manual tetap target ilustratif. Pilot perlu mendefinisikan baseline,
+formula, sumber data, pemilik, periode, tingkat override, serta false-positive rate bersama pelanggan.
 
 ## Risiko dan arah mitigasi
 

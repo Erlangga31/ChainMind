@@ -104,6 +104,29 @@ def test_sqlite_store_persists_run_and_idempotency_key(tmp_path: Any) -> None:
     store.close()
 
 
+def test_idempotency_keys_are_scoped_to_tenant(tmp_path: Any) -> None:
+    store = SQLiteEventStore(tmp_path / "tenant-events.sqlite3")
+    tenant_runs = [
+        DisruptionRun(
+            tenant_id=tenant_id,
+            event=DisruptionEvent(
+                title=f"Weather delay {tenant_id}",
+                description="Severe weather delayed a shipment.",
+                delay_days=5,
+                idempotency_key="same-external-key",
+                tenant_id=tenant_id,
+            ),
+        )
+        for tenant_id in ("tenant-a", "tenant-b")
+    ]
+    for run in tenant_runs:
+        store.save(run)
+
+    assert store.get_by_idempotency_key("same-external-key", "tenant-a") == tenant_runs[0]
+    assert store.get_by_idempotency_key("same-external-key", "tenant-b") == tenant_runs[1]
+    store.close()
+
+
 def test_hmac_verification_accepts_exact_signed_body_and_rejects_tampering() -> None:
     event = DisruptionEvent(
         title="Weather delay",
