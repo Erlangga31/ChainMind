@@ -13,9 +13,37 @@ def make_client() -> TestClient:
 
     settings = SandboxSettings(
         event_webhook_url="http://chainmind.test/disruptions",
+        event_bridge_secret="test-only-sandbox-secret",
         workflow_callback_url="http://chainmind.test",
     )
-    return TestClient(create_app(settings))
+    client = TestClient(create_app(settings))
+    token_response = client.post(
+        "/oauth/token",
+        data={
+            "grant_type": "client_credentials",
+            "client_id": "local-demo-client",
+            "client_secret": "local-demo-secret",
+        },
+    )
+    client.headers["Authorization"] = f"Bearer {token_response.json()['access_token']}"
+    return client
+
+
+def test_sap_routes_reject_expired_and_invalid_bearer_tokens() -> None:
+    client = make_client()
+    client.headers["Authorization"] = "Bearer invalid-token"
+
+    response = client.get("/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV/A_MaterialStock")
+
+    assert response.status_code == 401
+    assert response.json()["error"] == "invalid_token"
+    client.headers["Authorization"] = "Bearer valid-looking-token"
+    client.app.state.access_tokens["valid-looking-token"] = 0
+
+    expired = client.get("/ariba/sourcing/vendors")
+
+    assert expired.status_code == 401
+    assert expired.json()["error"] == "invalid_token"
 
 
 def test_s4hana_exposes_stock_and_odata_query_options() -> None:
@@ -69,6 +97,25 @@ def test_odata_invalid_filter_uses_odata_error_format() -> None:
     assert response.json()["error"]["code"] == "400"
 
 
+def test_odata_write_requires_csrf_token() -> None:
+    client = make_client()
+    response = client.post(
+        "/sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrder",
+        json={
+            "vendor_id": "vendor-b",
+            "vendor_name": "Vendor B",
+            "component_id": "microchip-x",
+            "component_name": "Microchip X",
+            "quantity": 5000,
+            "unit_price": 27,
+            "total_price": 135000,
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "csrf_token_required"
+
+
 def test_purchase_order_can_be_created_read_and_patched() -> None:
     client = make_client()
     order = {
@@ -82,10 +129,11 @@ def test_purchase_order_can_be_created_read_and_patched() -> None:
         "terms": "Air Freight",
     }
 
-    created = client.post(
-        "/sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrder",
-        json=order,
-    )
+    po_collection = "/sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrder"
+    csrf_token = client.get(po_collection, headers={"X-CSRF-Token": "Fetch"}).headers[
+        "X-CSRF-Token"
+    ]
+    created = client.post(po_collection, json=order, headers={"X-CSRF-Token": csrf_token})
 
     assert created.status_code == 201
     assert created.json()["d"]["status"] == "PENDING_APPROVAL"
@@ -106,6 +154,7 @@ def test_purchase_order_can_be_created_read_and_patched() -> None:
     patched = client.patch(
         f"/sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrder('{po_id}')",
         json={"status": "APPROVED"},
+        headers={"X-CSRF-Token": csrf_token},
     )
     assert patched.json()["d"]["status"] == "APPROVED"
     assert (
@@ -164,7 +213,7 @@ def test_scenarios_include_weather_geopolitics_supplier_failure_and_congestion()
         "weather",
         "geopolitical",
         "vendor_failure",
-        "port_congestion",
+        "logistics_delay",
     }
 
 
@@ -173,10 +222,18 @@ def test_event_mesh_injects_scenario_to_configured_webhook(
 ) -> None:
     import sap_sandbox.main as sandbox_main
 
-    delivered: list[tuple[str, dict[str, Any]]] = []
+    delivered: list[tuple[str, dict[str, Any], str | None, bool]] = []
 
-    async def capture_webhook(url: str, payload: dict[str, Any]) -> None:
-        delivered.append((url, payload))
+    async def capture_webhook(
+        url: str,
+        payload: dict[str, Any],
+        secret: str | None = None,
+        *,
+        require_signature: bool = False,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        del headers
+        delivered.append((url, payload, secret, require_signature))
 
     monkeypatch.setattr(sandbox_main, "post_webhook", capture_webhook)
     client = make_client()
@@ -186,12 +243,22 @@ def test_event_mesh_injects_scenario_to_configured_webhook(
     assert response.status_code == 202
     assert delivered[0][0] == "http://chainmind.test/disruptions"
     assert delivered[0][1]["source"] == "geopolitical-risk-feed"
+    assert delivered[0][2] == "test-only-sandbox-secret"
+    assert delivered[0][3] is True
 
 
 def test_event_mesh_reports_webhook_failure(monkeypatch: Any) -> None:
     import sap_sandbox.main as sandbox_main
 
-    async def fail_webhook(_: str, __: dict[str, Any]) -> None:
+    async def fail_webhook(
+        _: str,
+        __: dict[str, Any],
+        ___: str | None = None,
+        *,
+        require_signature: bool = False,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        del require_signature, headers
         raise httpx.ConnectError("connection refused")
 
     monkeypatch.setattr(sandbox_main, "post_webhook", fail_webhook)
@@ -212,10 +279,18 @@ def test_event_mesh_reports_webhook_failure(monkeypatch: Any) -> None:
 def test_workflow_task_is_idempotent_and_callback_runs_once(monkeypatch: Any) -> None:
     import sap_sandbox.main as sandbox_main
 
-    delivered: list[tuple[str, dict[str, Any]]] = []
+    delivered: list[tuple[str, dict[str, Any], dict[str, str] | None]] = []
 
-    async def capture_webhook(url: str, payload: dict[str, Any]) -> None:
-        delivered.append((url, payload))
+    async def capture_webhook(
+        url: str,
+        payload: dict[str, Any],
+        secret: str | None = None,
+        *,
+        require_signature: bool = False,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        del secret, require_signature
+        delivered.append((url, payload, headers))
 
     monkeypatch.setattr(sandbox_main, "post_webhook", capture_webhook)
     client = make_client()
@@ -235,6 +310,7 @@ def test_workflow_task_is_idempotent_and_callback_runs_once(monkeypatch: Any) ->
         (
             "http://chainmind.test/runs/run-123/decision",
             {"decision": "approve", "note": "Approved for demo."},
+            {"X-ChainMind-Role": "approver"},
         )
     ]
 
@@ -242,7 +318,15 @@ def test_workflow_task_is_idempotent_and_callback_runs_once(monkeypatch: Any) ->
 def test_workflow_rejects_conflicting_duplicate_decision(monkeypatch: Any) -> None:
     import sap_sandbox.main as sandbox_main
 
-    async def capture_webhook(_: str, __: dict[str, Any]) -> None:
+    async def capture_webhook(
+        _: str,
+        __: dict[str, Any],
+        ___: str | None = None,
+        *,
+        require_signature: bool = False,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        del require_signature, headers
         return None
 
     monkeypatch.setattr(sandbox_main, "post_webhook", capture_webhook)

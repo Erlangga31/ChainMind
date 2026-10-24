@@ -14,6 +14,8 @@ cdk.out/
 infra/cdk.out/
 .DS_Store
 *.log
+*.sqlite3
+data/notifications.jsonl
 .vscode/*
 !.vscode/settings.json
 *.py[cod]
@@ -22,3 +24,4 @@ coverage.xml
 .vite/
 cdk.context.json
 *.tsbuildinfo
+docs/reference/

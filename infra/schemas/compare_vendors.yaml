@@ -1,0 +1,16 @@
+{
+  "openapi": "3.0.1",
+  "info": {"title": "ChainMind vendor comparison action", "version": "1.0.0"},
+  "paths": {
+    "/compare_vendors": {
+      "post": {
+        "operationId": "compare_vendors",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object", "properties": {"event": {"type": "object"}, "inventory": {"type": "object"}}, "required": ["event", "inventory"]}}}
+        },
+        "responses": {"200": {"description": "Deterministic feasibility and cost comparison"}}
+      }
+    }
+  }
+}

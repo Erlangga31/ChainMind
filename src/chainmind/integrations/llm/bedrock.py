@@ -4,9 +4,10 @@ import json
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
+from pydantic import ValidationError
 
 from chainmind.core.errors import IntegrationError
-from chainmind.core.models import VendorEvaluation
+from chainmind.core.models import LLMExplanation, ReasoningTraceStep, VendorEvaluation
 
 
 class BedrockLLMClient:
@@ -22,9 +23,11 @@ class BedrockLLMClient:
         selected: VendorEvaluation,
         alternatives: list[VendorEvaluation],
         cost_of_inaction: float,
-    ) -> str:
+        run_id: str | None = None,
+    ) -> LLMExplanation:
         """Ask Bedrock for a concise explanation based only on computed facts."""
 
+        del run_id
         facts = {
             "selected_vendor": selected.model_dump(mode="json"),
             "alternatives": [item.model_dump(mode="json") for item in alternatives],
@@ -45,8 +48,24 @@ class BedrockLLMClient:
                 ],
                 inferenceConfig={"maxTokens": 350, "temperature": 0},
             )
-            return response["output"]["message"]["content"][0]["text"]
-        except (BotoCoreError, ClientError, KeyError, IndexError, TypeError) as exc:
+            text = response["output"]["message"]["content"][0]["text"]
+            return LLMExplanation(
+                text=text,
+                trace=[
+                    ReasoningTraceStep(
+                        source="Amazon Bedrock",
+                        text="Converse generated an explanation from deterministic inputs.",
+                    )
+                ],
+            )
+        except (
+            BotoCoreError,
+            ClientError,
+            KeyError,
+            IndexError,
+            TypeError,
+            ValidationError,
+        ) as exc:
             raise IntegrationError(
                 "Amazon Bedrock could not produce the decision explanation.",
                 details={"provider": "bedrock", "reason": str(exc)},

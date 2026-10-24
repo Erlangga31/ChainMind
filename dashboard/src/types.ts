@@ -56,13 +56,72 @@ export interface DisruptionRun {
     title: string;
     component_name: string;
     delay_days: number;
+    event_type: string | null;
   };
   stages: Stage[];
   vendor_comparison: VendorEvaluation[];
+  trace_steps: { source: string; text: string }[];
   selected_vendor_id: string | null;
   chain_of_thought: string[];
+  inventory_snapshot: {
+    current_stock: number;
+    daily_consumption: number;
+    line_stoppage_cost_per_day: number;
+    purchase_quantity: number;
+  } | null;
+  cost_of_inaction: number;
+  audit_log: {
+    timestamp: string;
+    agent: string;
+    input_summary: string;
+    output_summary: string;
+    reasoning: string;
+  }[];
   draft_po: PurchaseOrder | null;
+  execution_tracking: {
+    sap_reference: string;
+    ariba_reference: string;
+    confirmation: {
+      confirmation_status: string;
+      confirmed_quantity: number;
+      note: string;
+    };
+    shipment: {
+      tracking_id: string;
+      status: string;
+      estimated_arrival: string;
+      note: string;
+    };
+    inventory_projection: {
+      projected_stock_at_arrival: number;
+      projected_coverage_days: number;
+      source: string;
+    };
+    line_stoppage_avoided: boolean;
+    eta_deviation_days: number;
+    alert: string | null;
+    simulated: boolean;
+  } | null;
+  kpis: {
+    simulated: boolean;
+    cost_of_inaction: number;
+    action_cost: number;
+    illustrative_savings: number;
+    line_stoppage_avoided: boolean;
+    estimated_stockout_days_avoided: number;
+  } | null;
   error: string | null;
+}
+
+export interface KPIReport {
+  simulated: boolean;
+  label: string;
+  tracked_runs: number;
+  executed_runs: number;
+  line_stoppages_avoided: number;
+  illustrative_cost_of_inaction: number;
+  illustrative_action_cost: number;
+  illustrative_savings: number;
 }
 
 export interface ApiError {

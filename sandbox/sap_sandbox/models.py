@@ -54,3 +54,9 @@ class WorkflowDecisionRequest(SandboxModel):
 
     decision: Literal["approve", "reject"]
     note: str = Field(default="", max_length=1_000)
+
+
+class WorkflowDraftUpdate(SandboxModel):
+    """Replace the PO associated with an existing pending task."""
+
+    po_id: str = Field(min_length=1, max_length=100)

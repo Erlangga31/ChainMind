@@ -1,10 +1,28 @@
 """HTTP-level tests for the disruption and human decision endpoints."""
 
+import pytest
 from fastapi.testclient import TestClient
 
-from chainmind.api.main import app
+import chainmind.api.main as api
+from chainmind.core.config import Settings
+from chainmind.core.events import EventStore
+from chainmind.factory import create_pipeline
 
-client = TestClient(app)
+client = TestClient(api.app)
+
+
+@pytest.fixture(autouse=True)
+def isolate_api_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep API tests independent of persisted local runs and test ordering."""
+
+    monkeypatch.setattr(
+        api,
+        "pipeline",
+        create_pipeline(
+            Settings(mode="mock", notification_backends=[]),
+            EventStore(),
+        ),
+    )
 
 
 def test_disruption_api_lists_run_and_records_rejection() -> None:
@@ -28,9 +46,30 @@ def test_disruption_api_lists_run_and_records_rejection() -> None:
     decision = client.post(
         f"/runs/{run_id}/decision",
         json={"decision": "reject", "note": "Need supervisor review."},
+        headers={"X-ChainMind-Role": "approver"},
     )
     assert decision.status_code == 200
     assert decision.json()["status"] == "REJECTED"
+
+
+def test_viewer_and_missing_role_cannot_submit_decisions() -> None:
+    run = client.post(
+        "/disruptions",
+        json={
+            "title": "Weather delay",
+            "description": "Extreme weather has delayed the vessel.",
+            "delay_days": 5,
+        },
+    ).json()
+    url = f"/runs/{run['run_id']}/decision"
+    payload = {"decision": "reject", "note": "Viewer must not approve."}
+
+    viewer = client.post(url, json=payload, headers={"X-ChainMind-Role": "viewer"})
+    missing = client.post(url, json=payload)
+
+    assert viewer.status_code == 403
+    assert viewer.json()["code"] == "approver_role_required"
+    assert missing.status_code == 403
 
 
 def test_validation_and_health_responses_are_structured() -> None:
@@ -41,15 +80,44 @@ def test_validation_and_health_responses_are_structured() -> None:
     assert response.json()["code"] == "validation_error"
 
 
+def test_kpis_include_only_completed_tracking_and_are_labeled_illustrative() -> None:
+    created = client.post(
+        "/disruptions",
+        json={
+            "title": "Supplier shipment delay",
+            "description": "Extreme weather delayed the component shipment.",
+            "delay_days": 5,
+        },
+    )
+    run_id = created.json()["run_id"]
+    pending = client.get("/kpis").json()
+    assert pending["simulated"] is True
+    assert "illustrative" in pending["label"].lower()
+
+    approved = client.post(
+        f"/runs/{run_id}/decision",
+        json={"decision": "approve"},
+        headers={"X-ChainMind-Role": "approver"},
+    )
+    assert approved.status_code == 200
+    report = client.get("/kpis")
+
+    assert report.status_code == 200
+    assert report.json()["tracked_runs"] >= pending["tracked_runs"] + 1
+    assert report.json()["executed_runs"] >= pending["executed_runs"] + 1
+    assert report.json()["line_stoppages_avoided"] >= 1
+
+
 def test_dashboard_loopback_origin_is_allowed_by_cors() -> None:
     response = client.options(
         "/disruptions",
         headers={
             "Origin": "http://127.0.0.1:5173",
             "Access-Control-Request-Method": "POST",
-            "Access-Control-Request-Headers": "content-type",
+            "Access-Control-Request-Headers": "content-type,x-chainmind-role",
         },
     )
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
+    assert "x-chainmind-role" in response.headers["access-control-allow-headers"].lower()

@@ -1,15 +1,49 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ApiError, DisruptionRun } from "./types";
+import {
+  AgentReasoning,
+  AuditViewer,
+  ImpactPanel,
+  KpiCards,
+  VendorCharts,
+  WorkflowTimeline,
+} from "./components";
+import type { ApiError, DisruptionRun, KPIReport } from "./types";
 
 const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
-const DEMO_EVENT = {
-  title: "Extreme weather delays cargo ship",
-  description: "Severe weather has delayed the vessel carrying Microchip X by five days.",
-  component_id: "microchip-x",
-  component_name: "Microchip X",
-  delay_days: 5,
-  source: "dashboard-demo",
-};
+const SCENARIOS = [
+  {
+    id: "weather",
+    label: "Extreme weather",
+    title: "Extreme weather delays cargo ship",
+    description: "Severe weather delayed the vessel carrying Microchip X by five days.",
+    event_type: "weather",
+    delay_days: 5,
+  },
+  {
+    id: "geopolitical",
+    label: "Geopolitical disruption",
+    title: "Geopolitical disruption delays component supply",
+    description: "Regional restrictions delayed the shipment of Microchip X.",
+    event_type: "geopolitical",
+    delay_days: 5,
+  },
+  {
+    id: "vendor_failure",
+    label: "Vendor failure",
+    title: "Primary vendor reports a supply failure",
+    description: "The contracted supplier cannot fulfill the Microchip X shipment.",
+    event_type: "vendor_failure",
+    delay_days: 4,
+  },
+  {
+    id: "port_congestion",
+    label: "Port congestion",
+    title: "Port congestion delays inbound shipment",
+    description: "Port congestion delayed the Microchip X shipment by five days.",
+    event_type: "logistics_delay",
+    delay_days: 5,
+  },
+] as const;
 
 async function responseError(response: Response): Promise<Error> {
   let message = `Request failed with HTTP ${response.status}.`;
@@ -25,7 +59,14 @@ async function responseError(response: Response): Promise<Error> {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...(path.endsWith("/decision")
+        || path.includes("/notifications/links/")
+        ? { "X-ChainMind-Role": sessionStorage.getItem("chainmind.role") ?? "viewer" }
+        : {}),
+      ...init?.headers,
+    },
   });
   if (!response.ok) throw await responseError(response);
   return (await response.json()) as T;
@@ -57,13 +98,23 @@ export default function App() {
   const [run, setRun] = useState<DisruptionRun | null>(null);
   const [decisionNote, setDecisionNote] = useState("");
   const [revisionVendorId, setRevisionVendorId] = useState("");
+  const [scenarioId, setScenarioId] = useState<(typeof SCENARIOS)[number]["id"]>("weather");
+  const [role, setRole] = useState<"viewer" | "approver">(
+    sessionStorage.getItem("chainmind.role") === "approver" ? "approver" : "viewer",
+  );
+  const [page, setPage] = useState<"runs" | "kpis">("runs");
+  const [apiMode, setApiMode] = useState("mock");
+  const [kpis, setKpis] = useState<KPIReport | null>(null);
+  const [pendingDecision, setPendingDecision] = useState<"approve" | "reject" | "revise" | null>(null);
+  const [decisionConfirmed, setDecisionConfirmed] = useState(false);
+  const [notificationToken, setNotificationToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const refreshRuns = useCallback(async (preferredId?: string) => {
     const items = await request<DisruptionRun[]>("/runs");
     setRuns(items);
-    const nextId = preferredId ?? selectedId ?? items[0]?.run_id ?? "";
+    const nextId = preferredId || selectedId || items[0]?.run_id || "";
     setSelectedId(nextId);
     if (nextId) {
       const detail = await request<DisruptionRun>(`/runs/${nextId}`);
@@ -79,6 +130,46 @@ export default function App() {
     });
   }, [refreshRuns]);
 
+  useEffect(() => {
+    void request<{ mode: string }>("/health")
+      .then((health) => setApiMode(health.mode))
+      .catch((caught: unknown) => {
+        setError(caught instanceof Error ? caught.message : "Could not read API mode.");
+      });
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void refreshRuns().catch((caught: unknown) => {
+        setError(caught instanceof Error ? caught.message : "Could not refresh live run status.");
+      });
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [refreshRuns]);
+
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get("approve");
+    if (!token) return;
+    window.history.replaceState({}, "", window.location.pathname);
+    setNotificationToken(token);
+    void request<{ run_id: string; confirmation_required: boolean }>(
+      `/notifications/links/${encodeURIComponent(token)}`,
+    )
+      .then((result) => refreshRuns(result.run_id))
+      .catch((caught: unknown) => {
+        setError(caught instanceof Error ? caught.message : "The approval link could not be opened.");
+      });
+  }, [refreshRuns]);
+
+  useEffect(() => {
+    if (page !== "kpis") return;
+    void request<KPIReport>("/kpis")
+      .then(setKpis)
+      .catch((caught: unknown) => {
+        setError(caught instanceof Error ? caught.message : "Could not load KPI data.");
+      });
+  }, [page]);
+
   const feasibleVendors = useMemo(
     () => run?.vendor_comparison.filter((evaluation) => evaluation.feasible) ?? [],
     [run],
@@ -89,9 +180,18 @@ export default function App() {
     setBusy(true);
     setError("");
     try {
+      const scenario = SCENARIOS.find((item) => item.id === scenarioId) ?? SCENARIOS[0];
       const created = await request<{ run_id: string }>("/disruptions", {
         method: "POST",
-        body: JSON.stringify(DEMO_EVENT),
+        body: JSON.stringify({
+          title: scenario.title,
+          description: scenario.description,
+          event_type: scenario.event_type,
+          delay_days: scenario.delay_days,
+          component_id: "microchip-x",
+          component_name: "Microchip X",
+          source: "dashboard-demo",
+        }),
       });
       await refreshRuns(created.run_id);
     } catch (caught) {
@@ -112,18 +212,37 @@ export default function App() {
   }
 
   async function decide(decision: "approve" | "reject" | "revise") {
+    setPendingDecision(decision);
+    setDecisionConfirmed(false);
+  }
+
+  async function confirmDecision() {
+    if (!run || !pendingDecision || !decisionConfirmed || role !== "approver") return;
     if (!run) return;
     setBusy(true);
     setError("");
     try {
-      await request(`/runs/${run.run_id}/decision`, {
+      const fromNotification = pendingDecision === "approve" && notificationToken;
+      await request(
+        fromNotification
+          ? `/notifications/links/${encodeURIComponent(notificationToken)}/approve`
+          : `/runs/${run.run_id}/decision`,
+        {
         method: "POST",
-        body: JSON.stringify({
-          decision,
-          note: decisionNote,
-          ...(decision === "revise" ? { vendor_id: revisionVendorId } : {}),
-        }),
-      });
+          body: JSON.stringify(
+            fromNotification
+              ? { confirmed: true, note: decisionNote }
+              : {
+                  decision: pendingDecision,
+                  note: decisionNote,
+                  ...(pendingDecision === "revise" ? { vendor_id: revisionVendorId } : {}),
+                },
+          ),
+        },
+      );
+      setPendingDecision(null);
+      setNotificationToken("");
+      window.history.replaceState({}, "", window.location.pathname);
       await refreshRuns(run.run_id);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save the decision.");
@@ -143,7 +262,27 @@ export default function App() {
               <p className="text-xs text-slate-300">Autonomous Disruption Resolver</p>
             </div>
           </div>
-          <span className="rounded-full border border-teal-300/40 px-3 py-1 text-xs font-semibold text-teal-200">LOCAL · MOCK MODE</span>
+          <div className="flex items-center gap-3">
+            <label className="text-xs text-slate-300">
+              Mock SSO role
+              <select
+                aria-label="Mock SSO role"
+                className="ml-2 rounded-lg border border-slate-600 bg-slate-800 px-2 py-1 text-white"
+                value={role}
+                onChange={(event) => {
+                  const nextRole = event.target.value as "viewer" | "approver";
+                  setRole(nextRole);
+                  sessionStorage.setItem("chainmind.role", nextRole);
+                }}
+              >
+                <option value="viewer">Viewer</option>
+                <option value="approver">Approver</option>
+              </select>
+            </label>
+            <span className="rounded-full border border-teal-300/40 px-3 py-1 text-xs font-semibold text-teal-200">
+              {apiMode === "mock" ? "MOCK MODE" : `${apiMode.toUpperCase()} MODE`}
+            </span>
+          </div>
         </div>
       </header>
 
@@ -157,17 +296,38 @@ export default function App() {
               Financial action remains blocked until a human approves.
             </p>
           </div>
-          <button
-            className="rounded-xl bg-accent px-5 py-3 font-semibold text-white shadow-sm transition hover:bg-teal-800 disabled:cursor-wait disabled:opacity-60"
-            disabled={busy}
-            onClick={() => void triggerDemo()}
-          >
-            {busy ? "Working…" : "Trigger demo disruption"}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="text-sm font-medium text-slate-700">
+              Scenario
+              <select
+                aria-label="Disruption scenario"
+                className="ml-2 rounded-lg border border-slate-300 px-3 py-2"
+                value={scenarioId}
+                onChange={(event) => setScenarioId(event.target.value as typeof scenarioId)}
+              >
+                {SCENARIOS.map((scenario) => <option key={scenario.id} value={scenario.id}>{scenario.label}</option>)}
+              </select>
+            </label>
+            <button
+              className="rounded-xl bg-accent px-5 py-3 font-semibold text-white shadow-sm transition hover:bg-teal-800 disabled:cursor-wait disabled:opacity-60"
+              disabled={busy}
+              onClick={() => void triggerDemo()}
+            >
+              {busy ? "Working…" : "Trigger demo disruption"}
+            </button>
+          </div>
         </section>
 
         {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div>}
 
+        <nav className="flex gap-2" aria-label="Dashboard sections">
+          <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "runs" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("runs")}>Disruptions</button>
+          <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "kpis" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("kpis")}>KPIs</button>
+        </nav>
+
+        {page === "kpis" ? (
+          kpis ? <KpiCards report={kpis} /> : <div className="rounded-xl bg-white p-6 text-slate-500">Loading KPI data…</div>
+        ) : (
         <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
           <aside className="h-fit rounded-2xl bg-white p-4 shadow-card">
             <div className="mb-3 flex items-center justify-between px-2">
@@ -205,18 +365,44 @@ export default function App() {
                   </div>
                   <StatusPill status={run.status} />
                 </div>
-                <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                  {run.stages.map((stage, index) => (
-                    <div key={stage.name} className="rounded-xl border border-slate-200 p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-semibold text-slate-500">0{index + 1} · {stage.name}</span>
-                        <StatusPill status={stage.status} />
-                      </div>
-                      <p className="mt-2 text-sm leading-5 text-slate-700">{stage.summary}</p>
-                    </div>
-                  ))}
-                </div>
+                <div className="mt-6"><WorkflowTimeline run={run} /></div>
               </section>
+
+              <ImpactPanel run={run} />
+              <VendorCharts
+                evaluations={run.vendor_comparison}
+                selectedVendorId={run.selected_vendor_id}
+                costOfInaction={run.cost_of_inaction}
+              />
+
+              {run.execution_tracking && (
+                <section className="rounded-2xl bg-white p-5 shadow-card md:p-6">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm text-slate-500">Post-approval operations</p>
+                      <h2 className="text-lg font-bold text-ink">Execution & tracking</h2>
+                    </div>
+                    <StatusPill status={run.execution_tracking.shipment.status} />
+                  </div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">Supplier confirmation<strong className="mt-1 block text-ink">{run.execution_tracking.confirmation.confirmation_status} · {run.execution_tracking.confirmation.confirmed_quantity.toLocaleString()} pcs</strong></p>
+                    <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">ASN / ETA<strong className="mt-1 block text-ink">{run.execution_tracking.shipment.tracking_id} · {run.execution_tracking.shipment.estimated_arrival}</strong></p>
+                    <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">Projected stock<strong className="mt-1 block text-ink">{run.execution_tracking.inventory_projection.projected_stock_at_arrival.toLocaleString()} pcs · {run.execution_tracking.inventory_projection.projected_coverage_days} days</strong></p>
+                    <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">Line stoppage<strong className="mt-1 block text-ink">{run.execution_tracking.line_stoppage_avoided ? "Avoided (simulated)" : "Not avoided"}</strong></p>
+                  </div>
+                  {run.execution_tracking.alert && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{run.execution_tracking.alert}</p>}
+                  {run.kpis && (
+                    <div className="mt-4 border-t border-slate-100 pt-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Illustrative per-run KPI · not a forecast</p>
+                      <div className="mt-2 grid gap-3 sm:grid-cols-3">
+                        <p className="text-sm text-slate-500">Cost of inaction<strong className="block text-ink">{money(run.kpis.cost_of_inaction)}</strong></p>
+                        <p className="text-sm text-slate-500">Action cost<strong className="block text-ink">{money(run.kpis.action_cost)}</strong></p>
+                        <p className="text-sm text-slate-500">Illustrative savings<strong className="block text-ink">{money(run.kpis.illustrative_savings)}</strong></p>
+                      </div>
+                    </div>
+                  )}
+                </section>
+              )}
 
               <section className="rounded-2xl bg-white p-5 shadow-card md:p-6">
                 <div className="mb-4 flex items-end justify-between gap-3">
@@ -226,13 +412,14 @@ export default function App() {
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[700px] text-left text-sm">
                     <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-                      <tr><th className="px-3 py-3">Vendor</th><th className="px-3 py-3">Lead</th><th className="px-3 py-3">Quote</th><th className="px-3 py-3">Risk score</th><th className="px-3 py-3">Residual loss</th><th className="px-3 py-3">Economic total</th><th className="px-3 py-3">Status</th></tr>
+                      <tr><th className="px-3 py-3">Vendor</th><th className="px-3 py-3">Lead</th><th className="px-3 py-3">Capacity</th><th className="px-3 py-3">Quote</th><th className="px-3 py-3">Risk score</th><th className="px-3 py-3">Residual loss</th><th className="px-3 py-3">Economic total</th><th className="px-3 py-3">Status</th></tr>
                     </thead>
                     <tbody>
                       {run.vendor_comparison.map((evaluation) => (
                         <tr className={`border-b border-slate-100 ${evaluation.vendor.vendor_id === run.selected_vendor_id ? "bg-teal-50/70" : ""}`} key={evaluation.vendor.vendor_id}>
                           <td className="px-3 py-3 font-semibold">{evaluation.vendor.vendor_name}{evaluation.vendor.vendor_id === run.selected_vendor_id && <span className="ml-2 text-xs text-accent">Recommended</span>}</td>
                           <td className="px-3 py-3">{evaluation.vendor.lead_time_days} days</td>
+                          <td className="px-3 py-3">{evaluation.vendor.capacity.toLocaleString()} pcs</td>
                           <td className="px-3 py-3">{money(evaluation.action_cost)}</td>
                           <td className="px-3 py-3">{evaluation.vendor.risk_score}/100</td>
                           <td className="px-3 py-3">{money(evaluation.residual_stockout_loss)}</td>
@@ -246,15 +433,7 @@ export default function App() {
               </section>
 
               <div className="grid gap-6 xl:grid-cols-2">
-                <section className="rounded-2xl bg-white p-5 shadow-card md:p-6">
-                  <p className="text-sm text-slate-500">Decision record</p>
-                  <h2 className="text-lg font-bold text-ink">Chain of Thought summary</h2>
-                  {run.chain_of_thought.length > 0 ? (
-                    <ol className="mt-4 space-y-3">
-                      {run.chain_of_thought.map((thought, index) => <li key={`${index}-${thought}`} className="flex gap-3 text-sm leading-6 text-slate-700"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-teal-50 text-xs font-bold text-accent">{index + 1}</span><span>{thought}</span></li>)}
-                    </ol>
-                  ) : <p className="mt-4 text-sm text-slate-500">No reasoning was recorded.</p>}
-                </section>
+                <AgentReasoning run={run} />
 
                 <section className="rounded-2xl bg-white p-5 shadow-card md:p-6">
                   <p className="text-sm text-slate-500">
@@ -273,7 +452,7 @@ export default function App() {
                           {run.draft_po.sap_reference && <p className="col-span-2 text-slate-500">SAP reference <strong className="block text-ink">{run.draft_po.sap_reference}</strong></p>}
                         </div>
                       </div>
-                      {pending && (
+                      {pending && role === "approver" && (
                         <div className="mt-4 space-y-3">
                           <label className="block text-sm font-medium text-slate-700">Decision note
                             <input className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" value={decisionNote} onChange={(event) => setDecisionNote(event.target.value)} placeholder="Optional note for the audit record" />
@@ -285,17 +464,19 @@ export default function App() {
                             </select>
                           </label>
                           <div className="flex flex-wrap gap-2 pt-1">
-                            <button className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={busy} onClick={() => void decide("approve")}>Approve &amp; execute</button>
+                            <button className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={busy} onClick={() => void decide("approve")}>Review approval</button>
                             <button className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50" disabled={busy || !revisionVendorId} onClick={() => void decide("revise")}>Revise vendor</button>
                             <button className="rounded-lg border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 disabled:opacity-50" disabled={busy} onClick={() => void decide("reject")}>Reject</button>
                           </div>
                           <p className="text-xs leading-5 text-slate-500">Approve executes the PO in the configured SAP adapter. Reject and revise do not execute a purchase.</p>
                         </div>
                       )}
+                      {pending && role === "viewer" && <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Viewer access is read-only. Switch to Approver in Mock SSO to submit a decision.</p>}
                     </>
                   ) : <p className="mt-4 text-sm text-slate-500">No purchase order was created for this run.</p>}
                 </section>
               </div>
+              <AuditViewer run={run} />
             </div>
           ) : (
             <section className="grid min-h-64 place-items-center rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
@@ -303,7 +484,30 @@ export default function App() {
             </section>
           )}
         </div>
+        )}
       </main>
+      {pendingDecision && (
+        <div className="fixed inset-0 z-20 grid place-items-center bg-ink/60 p-4" role="presentation">
+          <section role="dialog" aria-modal="true" aria-labelledby="decision-title" className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+            <h2 id="decision-title" className="text-xl font-bold text-ink">Confirm {pendingDecision}</h2>
+            <p className="mt-2 text-sm text-slate-600">
+              {pendingDecision === "approve"
+                ? "This authorizes the pending purchase order to be executed by the configured SAP adapter."
+                : "This decision will be recorded in the run audit log."}
+            </p>
+            <label className="mt-4 flex items-start gap-3 text-sm text-slate-700">
+              <input type="checkbox" checked={decisionConfirmed} onChange={(event) => setDecisionConfirmed(event.target.checked)} />
+              I explicitly confirm this human decision.
+            </label>
+            <div className="mt-5 flex justify-end gap-2">
+              <button className="rounded-lg border border-slate-300 px-4 py-2" onClick={() => setPendingDecision(null)}>Cancel</button>
+              <button className="rounded-lg bg-accent px-4 py-2 font-semibold text-white disabled:opacity-50" disabled={!decisionConfirmed || busy} onClick={() => void confirmDecision()}>
+                {busy ? "Submitting…" : "Confirm decision"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

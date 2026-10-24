@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import secrets
+import time
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from importlib.resources import files
@@ -24,11 +25,14 @@ from sap_sandbox.models import (
     MaterialStock,
     PurchaseOrderStatusPatch,
     WorkflowDecisionRequest,
+    WorkflowDraftUpdate,
     WorkflowTaskRequest,
 )
+from starlette.responses import Response
 from starlette.status import HTTP_400_BAD_REQUEST, HTTP_409_CONFLICT, HTTP_502_BAD_GATEWAY
 
-from chainmind.core.models import DisruptionEvent, PurchaseOrder, Vendor
+from chainmind.core.models import DisruptionEvent, InventoryProjection, PurchaseOrder, Vendor
+from chainmind.integrations.external.signing import SIGNATURE_HEADER, sign_payload
 
 ODATA_STOCK_PATH = "/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV/A_MaterialStock"
 ODATA_PO_PATH = "/sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrder"
@@ -69,6 +73,8 @@ class SandboxState:
     """In-memory records backing the local SAP sandbox."""
 
     orders: dict[str, PurchaseOrder] = field(default_factory=dict)
+    ariba_orders: dict[str, PurchaseOrder] = field(default_factory=dict)
+    inventory_projections: dict[str, InventoryProjection] = field(default_factory=dict)
     workflow_tasks: dict[str, WorkflowTask] = field(default_factory=dict)
     workflow_by_run: dict[str, str] = field(default_factory=dict)
     published_events: list[DisruptionEvent] = field(default_factory=list)
@@ -133,11 +139,28 @@ def load_vendors() -> list[Vendor]:
     return [Vendor.model_validate(item) for item in json.loads(raw)]
 
 
-async def post_webhook(url: str, payload: dict[str, Any]) -> None:
-    """Deliver a simulator webhook and raise on non-success HTTP responses."""
+async def post_webhook(
+    url: str,
+    payload: dict[str, Any],
+    secret: str | None = None,
+    *,
+    require_signature: bool = False,
+    headers: dict[str, str] | None = None,
+) -> None:
+    """Deliver a simulator webhook and sign event messages when requested."""
 
+    if require_signature and not secret:
+        raise ValueError("SAP_SANDBOX_EVENT_BRIDGE_SECRET must be configured.")
+    request_headers = {"Content-Type": "application/json", **(headers or {})}
+    body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    if secret:
+        request_headers[SIGNATURE_HEADER] = sign_payload(body, secret)
     async with httpx.AsyncClient(timeout=5.0) as client:
-        response = await client.post(url, json=payload)
+        response = await client.post(
+            url,
+            content=body,
+            headers=request_headers,
+        )
         response.raise_for_status()
 
 
@@ -163,6 +186,60 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
     vendors = load_vendors()
     app = FastAPI(title="ChainMind Local SAP Sandbox", version="0.1.0")
     app.state.sandbox = state
+    app.state.csrf_token = secrets.token_urlsafe(24)
+    app.state.access_tokens: dict[str, float] = {}
+
+    @app.middleware("http")
+    async def csrf_middleware(request: Request, call_next: Any) -> Response:
+        """Enforce demo bearer tokens and CSRF protection for SAP operations."""
+
+        if request.url.path.startswith(("/sap/", "/ariba/")):
+            authorization = request.headers.get("Authorization", "")
+            scheme, _, token = authorization.partition(" ")
+            expires_at = app.state.access_tokens.get(token, 0.0)
+            if (
+                scheme.lower() != "bearer"
+                or not token
+                or expires_at <= time.monotonic()
+                or not secrets.compare_digest(
+                    authorization,
+                    f"Bearer {token}",
+                )
+            ):
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": "invalid_token"},
+                )
+        csrf_protected = request.url.path.startswith(
+            (
+                ODATA_PO_PATH,
+                "/sap/opu/odata/sap/Z_CHAINMIND_TRACKING_SRV/InventoryProjection",
+            )
+        )
+        method = request.method.upper()
+        if csrf_protected and method in {"POST", "PATCH"}:
+            supplied = request.headers.get("X-CSRF-Token", "")
+            if not secrets.compare_digest(supplied, app.state.csrf_token):
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "error": {
+                            "code": "csrf_token_required",
+                            "message": {
+                                "lang": "en",
+                                "value": "A valid X-CSRF-Token header is required.",
+                            },
+                        }
+                    },
+                )
+        response = await call_next(request)
+        if (
+            csrf_protected
+            and method == "GET"
+            and request.headers.get("X-CSRF-Token", "").lower() == "fetch"
+        ):
+            response.headers["X-CSRF-Token"] = app.state.csrf_token
+        return response
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(
@@ -196,10 +273,13 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
                 status_code=HTTP_400_BAD_REQUEST,
                 content={"error": "unsupported_grant_type"},
             )
+        access_token = secrets.token_urlsafe(32)
+        expires_in = 3600
+        app.state.access_tokens[access_token] = time.monotonic() + expires_in
         return {
-            "access_token": secrets.token_urlsafe(32),
+            "access_token": access_token,
             "token_type": "Bearer",
-            "expires_in": 3600,
+            "expires_in": expires_in,
         }
 
     @app.get(ODATA_STOCK_PATH, response_model=None)
@@ -287,6 +367,7 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
                     {
                         "Material": stock.Material,
                         "PurchaseOrder": "4500000001",
+                        "ShipmentId": "SHIP-MICROCHIP-X-001",
                         "ExpectedDate": (date.today() + timedelta(days=5)).isoformat(),
                         "Quantity": 1000,
                     }
@@ -351,7 +432,43 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
         if order is None:
             return odata_error("404", "Purchase order was not found.", 404)
         order.status = update.status
+        if update.status == "EXECUTED":
+            order.sap_reference = f"MOCK-PO-{order.po_id.hex[:8].upper()}"
         return {"d": order.model_dump(mode="json")}
+
+    @app.post("/sap/opu/odata/sap/Z_CHAINMIND_TRACKING_SRV/InventoryProjection")
+    def save_inventory_projection(projection: InventoryProjection) -> dict[str, Any]:
+        """Store the non-authoritative projected stock snapshot."""
+
+        state.inventory_projections[projection.component_id] = projection
+        return {"d": projection.model_dump(mode="json")}
+
+    @app.get(
+        "/sap/opu/odata/sap/Z_CHAINMIND_TRACKING_SRV/InventoryProjection",
+        response_model=None,
+    )
+    def list_inventory_projections() -> dict[str, Any]:
+        """Provide the collection read used to fetch CSRF tokens before writes."""
+
+        return {
+            "d": {
+                "results": [
+                    item.model_dump(mode="json") for item in state.inventory_projections.values()
+                ]
+            }
+        }
+
+    @app.get(
+        "/sap/opu/odata/sap/Z_CHAINMIND_TRACKING_SRV/InventoryProjection/{component_id}",
+        response_model=None,
+    )
+    def get_inventory_projection(component_id: str) -> dict[str, Any] | JSONResponse:
+        """Return a stored illustrative inventory projection."""
+
+        projection = state.inventory_projections.get(component_id)
+        if projection is None:
+            return odata_error("404", "Inventory projection was not found.", 404)
+        return {"d": projection.model_dump(mode="json")}
 
     @app.get("/ariba/sourcing/vendors", response_model=None)
     def list_ariba_vendors(
@@ -394,26 +511,44 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
             }
         }
 
-    @app.get("/ariba/po/{po_id}/confirmation")
-    def get_vendor_confirmation(po_id: str) -> dict[str, Any]:
-        """Return a stable simulated supplier confirmation."""
+    @app.post("/ariba/po", response_model=None)
+    def submit_ariba_purchase_order(order: PurchaseOrder) -> dict[str, Any] | JSONResponse:
+        """Register an approved purchase order in the simulated supplier network."""
 
+        key = str(order.po_id)
+        state.ariba_orders.setdefault(key, order.model_copy(deep=True))
+        return {"ariba_reference": f"MOCK-ARIBA-{order.po_id.hex[:8].upper()}"}
+
+    @app.get("/ariba/po/{po_id}/confirmation", response_model=None)
+    def get_vendor_confirmation(po_id: str) -> dict[str, Any] | JSONResponse:
+        """Return a supplier confirmation only for a registered purchase order."""
+
+        order = state.ariba_orders.get(po_id)
+        if order is None:
+            return odata_error("404", "Ariba purchase order was not found.", 404)
         return {
             "purchase_order_id": po_id,
             "confirmation_status": "CONFIRMED",
-            "confirmed_quantity": stock.PurchaseQuantity,
+            "confirmed_quantity": order.quantity,
             "note": "Simulated supplier confirmation.",
         }
 
-    @app.get("/ariba/po/{po_id}/asn")
-    def get_advance_ship_notice(po_id: str) -> dict[str, Any]:
-        """Return a simulated advance ship notice and estimated arrival."""
+    @app.get("/ariba/po/{po_id}/asn", response_model=None)
+    def get_advance_ship_notice(po_id: str) -> dict[str, Any] | JSONResponse:
+        """Return an ASN using the lead time of the submitted PO's chosen vendor."""
+
+        order = state.ariba_orders.get(po_id)
+        if order is None:
+            return odata_error("404", "Ariba purchase order was not found.", 404)
+        vendor = next((item for item in vendors if item.vendor_id == order.vendor_id), None)
+        if vendor is None:
+            return odata_error("404", "The PO's supplier was not found.", 404)
 
         return {
             "purchase_order_id": po_id,
             "asn_id": f"ASN-{po_id[:8].upper()}",
             "status": "IN_TRANSIT",
-            "estimated_arrival": (date.today() + timedelta(days=2)).isoformat(),
+            "estimated_arrival": (date.today() + timedelta(days=vendor.lead_time_days)).isoformat(),
             "note": "Simulated advance ship notice.",
         }
 
@@ -425,8 +560,13 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
 
         webhook_url = sandbox_settings.event_webhook_url
         try:
-            await post_webhook(webhook_url, request.event.model_dump(mode="json"))
-        except httpx.HTTPError:
+            await post_webhook(
+                webhook_url,
+                request.event.model_dump(mode="json"),
+                sandbox_settings.event_bridge_secret,
+                require_signature=True,
+            )
+        except (httpx.HTTPError, ValueError):
             return JSONResponse(
                 status_code=HTTP_502_BAD_GATEWAY,
                 content={
@@ -468,18 +608,16 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
                 status_code=404,
                 content={"error": {"code": "scenario_not_found", "message": scenario_id}},
             )
-        event_data = {
-            key: value
-            for key, value in scenario.items()
-            if key not in {"scenario_id", "event_type"}
-        }
+        event_data = {key: value for key, value in scenario.items() if key != "scenario_id"}
         event = DisruptionEvent.model_validate(event_data)
         try:
             await post_webhook(
                 sandbox_settings.event_webhook_url,
                 event.model_dump(mode="json"),
+                sandbox_settings.event_bridge_secret,
+                require_signature=True,
             )
-        except httpx.HTTPError:
+        except (httpx.HTTPError, ValueError):
             return JSONResponse(
                 status_code=HTTP_502_BAD_GATEWAY,
                 content={
@@ -525,6 +663,62 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
             )
         return task.as_dict()
 
+    @app.post("/workflow/tasks/{task_id}/sync", response_model=None)
+    async def sync_workflow_decision(
+        task_id: str,
+        decision: WorkflowDecisionRequest,
+    ) -> dict[str, Any] | JSONResponse:
+        """Synchronize a ChainMind decision without calling the run callback."""
+
+        async with state.workflow_lock:
+            task = state.workflow_tasks.get(task_id)
+            if task is None:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": {"code": "task_not_found", "message": task_id}},
+                )
+            if task.decision is not None and task.decision != decision.decision:
+                return JSONResponse(
+                    status_code=HTTP_409_CONFLICT,
+                    content={
+                        "error": {
+                            "code": "decision_conflict",
+                            "message": "The workflow task already has a different decision.",
+                        }
+                    },
+                )
+            task.status = "APPROVED" if decision.decision == "approve" else "REJECTED"
+            task.decision = decision.decision
+            task.note = decision.note
+            return task.as_dict()
+
+    @app.patch("/workflow/tasks/{task_id}/draft", response_model=None)
+    async def update_workflow_draft(
+        task_id: str,
+        update: WorkflowDraftUpdate,
+    ) -> dict[str, Any] | JSONResponse:
+        """Associate a revised purchase-order draft with the pending task."""
+
+        async with state.workflow_lock:
+            task = state.workflow_tasks.get(task_id)
+            if task is None:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": {"code": "task_not_found", "message": task_id}},
+                )
+            if task.decision is not None:
+                return JSONResponse(
+                    status_code=HTTP_409_CONFLICT,
+                    content={
+                        "error": {
+                            "code": "decision_already_recorded",
+                            "message": "The workflow task already has a decision.",
+                        }
+                    },
+                )
+            task.po_id = update.po_id
+            return task.as_dict()
+
     @app.post("/workflow/tasks/{task_id}/decision", response_model=None)
     async def decide_workflow_task(
         task_id: str,
@@ -551,6 +745,9 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
                         },
                     )
                 return task.as_dict()
+            task.status = "APPROVED" if decision.decision == "approve" else "REJECTED"
+            task.decision = decision.decision
+            task.note = decision.note
             callback_url = (
                 f"{sandbox_settings.workflow_callback_url.rstrip('/')}/runs/{task.run_id}/decision"
             )
@@ -558,22 +755,27 @@ def create_app(settings: SandboxSettings | None = None) -> FastAPI:
                 "decision": decision.decision,
                 "note": decision.note,
             }
-            try:
-                await post_webhook(callback_url, callback_payload)
-            except httpx.HTTPError:
-                return JSONResponse(
-                    status_code=HTTP_502_BAD_GATEWAY,
-                    content={
-                        "error": {
-                            "code": "workflow_callback_failed",
-                            "message": "The configured workflow callback could not be reached.",
-                        }
-                    },
-                )
-            task.status = "APPROVED" if decision.decision == "approve" else "REJECTED"
-            task.decision = decision.decision
-            task.note = decision.note
-            return task.as_dict()
+        try:
+            await post_webhook(
+                callback_url,
+                callback_payload,
+                headers={"X-ChainMind-Role": "approver"},
+            )
+        except httpx.HTTPError:
+            async with state.workflow_lock:
+                task.status = "PENDING"
+                task.decision = None
+                task.note = ""
+            return JSONResponse(
+                status_code=HTTP_502_BAD_GATEWAY,
+                content={
+                    "error": {
+                        "code": "workflow_callback_failed",
+                        "message": "The configured workflow callback could not be reached.",
+                    }
+                },
+            )
+        return task.as_dict()
 
     return app
 

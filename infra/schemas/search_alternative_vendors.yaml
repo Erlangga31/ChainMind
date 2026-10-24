@@ -1,0 +1,16 @@
+{
+  "openapi": "3.0.1",
+  "info": {"title": "ChainMind vendor search action", "version": "1.0.0"},
+  "paths": {
+    "/search_alternative_vendors": {
+      "post": {
+        "operationId": "search_alternative_vendors",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object", "properties": {"title": {"type": "string"}, "description": {"type": "string"}, "component_id": {"type": "string"}, "component_name": {"type": "string"}, "delay_days": {"type": "number"}}, "required": ["title", "description", "delay_days"]}}}
+        },
+        "responses": {"200": {"description": "Validated SAP Ariba supplier offers"}}
+      }
+    }
+  }
+}

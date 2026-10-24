@@ -17,13 +17,36 @@ class Settings(BaseSettings):
     )
 
     mode: Literal["mock", "aws"] = "mock"
+    sap_backend: Literal["mock", "sandbox", "real"] | None = None
+    llm_backend: Literal["mock", "bedrock", "bedrock_agents"] | None = None
     aws_region: str = "us-east-1"
     bedrock_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0"
+    bedrock_agent_id: str | None = None
+    bedrock_agent_alias_id: str | None = None
     stockout_tolerance_days: float = Field(default=0.0, ge=0)
     safety_reserve_days: float = Field(default=0.25, ge=0)
     retry_attempts: int = Field(default=3, ge=1, le=8)
     retry_base_delay_seconds: float = Field(default=0.1, ge=0)
+    max_revisions: int = Field(default=3, ge=0, le=10)
     event_table_name: str = "chainmind-events"
+    event_database_path: str = "data/chainmind-events.sqlite3"
+    event_bus_name: str = "chainmind"
+    event_bridge_secret: str | None = None
+    notification_backends: list[Literal["console", "teams", "slack", "email"]] = Field(
+        default_factory=lambda: ["console"]
+    )
+    notification_link_secret: str | None = None
+    notification_link_secret_id: str | None = None
+    notification_link_ttl_minutes: int = Field(default=60, ge=1, le=10_080)
+    notification_api_base_url: str = "http://localhost:8000"
+    notification_dashboard_url: str = "http://localhost:5173"
+    notification_approval_overdue_minutes: int = Field(default=1_440, ge=1)
+    notification_eta_deviation_threshold_days: float = Field(default=0, ge=0)
+    notification_teams_webhook_url: str | None = None
+    notification_slack_webhook_url: str | None = None
+    notification_email_sender: str | None = None
+    notification_email_recipient: str | None = None
+    notification_email_outbox_path: str = "data/notifications.jsonl"
     artifact_bucket_name: str = "chainmind-artifacts"
     api_cors_origins: list[str] = Field(
         default_factory=lambda: [
@@ -32,6 +55,25 @@ class Settings(BaseSettings):
         ]
     )
     sap_base_url: str | None = None
+    sap_integration_suite_url: str | None = None
+    sap_token_url: str | None = None
+    sap_client_id: str | None = None
+    sap_client_secret: str | None = None
+    sap_secrets_secret_id: str | None = None
+    sap_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+    sap_workflow_base_url: str = "http://127.0.0.1:8100"
+
+    @property
+    def resolved_sap_backend(self) -> Literal["mock", "sandbox", "real"]:
+        """Resolve explicit SAP selection or the legacy overall mode preset."""
+
+        return self.sap_backend or ("mock" if self.mode == "mock" else "real")
+
+    @property
+    def resolved_llm_backend(self) -> Literal["mock", "bedrock", "bedrock_agents"]:
+        """Resolve explicit language-model selection or the legacy overall mode preset."""
+
+        return self.llm_backend or ("mock" if self.mode == "mock" else "bedrock")
 
 
 @lru_cache

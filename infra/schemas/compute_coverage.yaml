@@ -1,0 +1,16 @@
+{
+  "openapi": "3.0.1",
+  "info": {"title": "ChainMind coverage action", "version": "1.0.0"},
+  "paths": {
+    "/compute_coverage": {
+      "post": {
+        "operationId": "compute_coverage",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object", "properties": {"inventory": {"type": "object", "properties": {"component_id": {"type": "string"}, "component_name": {"type": "string"}, "current_stock": {"type": "integer"}, "daily_consumption": {"type": "integer"}, "line_stoppage_cost_per_day": {"type": "number"}, "purchase_quantity": {"type": "integer"}}}}, "required": ["inventory"]}}}
+        },
+        "responses": {"200": {"description": "Deterministically computed coverage"}}
+      }
+    }
+  }
+}

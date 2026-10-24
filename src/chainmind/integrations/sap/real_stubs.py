@@ -1,7 +1,13 @@
 """Explicit placeholders for SAP Integration Suite connectivity."""
 
 from chainmind.core.errors import IntegrationError
-from chainmind.core.models import DisruptionEvent, InventorySnapshot, PurchaseOrder, Vendor
+from chainmind.core.models import (
+    AffectedSupplyChainRecords,
+    DisruptionEvent,
+    InventorySnapshot,
+    PurchaseOrder,
+    Vendor,
+)
 
 
 class RealSAPClient:
@@ -14,6 +20,14 @@ class RealSAPClient:
             "Real SAP S/4HANA connectivity is not configured; implement the "
             "Integration Suite adapter.",
             details={"component_id": component_id},
+        )
+
+    def find_affected_records(self, event: DisruptionEvent) -> AffectedSupplyChainRecords:
+        """Find related SAP shipment and open-PO records."""
+
+        raise IntegrationError(
+            "Real SAP shipment matching is not configured.",
+            details={"component_id": event.component_id},
         )
 
     def create_draft_purchase_order(self, order: PurchaseOrder) -> PurchaseOrder:
