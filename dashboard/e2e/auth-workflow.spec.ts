@@ -112,6 +112,13 @@ test("approver resolves weather disruption and completes execution tracking", as
   await page.getByRole("button", { name: "KPIs" }).click();
   await expect(page.getByRole("heading", { name: "Response KPIs" })).toBeVisible();
   await saveSection(page, "Response KPIs", "kpis.png");
+  await page.getByRole("button", { name: "Flow" }).click();
+  const trackingFlow = page.getByTestId("flow-stage-6-tracking");
+  await expect(trackingFlow).toContainText(/Shipment .* status:/);
+  await expect(trackingFlow).toContainText(/ETA updated to/);
+  await expect(trackingFlow).toContainText(/Projected inventory at arrival/);
+  await expect(trackingFlow).toContainText(/No ETA deviation/);
+  await expect(trackingFlow).toContainText(/Line-stoppage avoidance target achieved/);
 });
 
 test("viewer can inspect a draft but cannot approve it", async ({ page }) => {
@@ -208,33 +215,54 @@ test("live proposal flow highlights the seeded stages and decision branches in b
   await page.getByRole("button", { name: "Flow", exact: true }).click();
   const diagram = page.getByRole("img", { name: "Live end-to-end disruption resolution flow" });
   await expect(diagram).toBeVisible();
+  await expect(page.getByTestId("flow-stage-0")).toHaveAttribute("data-status", "complete");
   for (let stage = 1; stage <= 4; stage += 1) {
     await expect(page.getByTestId(`flow-stage-${stage}`)).toHaveAttribute("data-status", "complete");
   }
+  await expect(page.getByTestId("flow-stage-4-po")).toHaveAttribute("data-status", "active");
   await expect(page.getByTestId("flow-stage-5")).toHaveAttribute("data-status", "active");
   await expect(page.getByTestId("flow-stage-6")).toHaveAttribute("data-status", "waiting");
   await expect(page.getByTestId("flow-branch-significant-impact")).toHaveAttribute("data-active", "true");
   await expect(page.getByTestId("flow-branch-insignificant-end")).toHaveAttribute("data-active", "false");
   await expect(page.getByText(/Vendor B: 2d/)).toBeVisible();
   await expect(page.getByText(/PENDING_APPROVAL/)).toBeVisible();
+  await expect(page.getByText("Amazon DynamoDB")).toBeVisible();
+  await expect(page.getByText("SAP S/4HANA").first()).toBeVisible();
+  await expect(page.getByText("SAP Ariba Network").first()).toBeVisible();
+  await expect(page.getByTestId("flow-stage-4-po")).toContainText("DRAFT-");
+  await expect(page.getByTestId("flow-stage-4-po")).toContainText("$135,000");
+  await expect(page.getByText(/Monitor shipment|Pantau pengiriman/)).toBeVisible();
+  const trackingFlow = page.getByTestId("flow-stage-6-tracking");
+  await expect(trackingFlow).toContainText("Waiting for human approval");
+  await expect(trackingFlow).toContainText("Monitor shipment");
+  await expect(trackingFlow).toContainText("Update ETA · inventory");
+  await expect(trackingFlow).toContainText("Deviation alert");
+  await expect(trackingFlow).toContainText("KPI achieved");
+  await expect(page.getByText("AWS — Event Ingestion Layer")).toBeVisible();
+  await expect(page.getByText("Economic Analysis")).toBeVisible();
   const englishAxe = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze();
   expect(
     englishAxe.violations.filter((violation) => ["critical", "serious"].includes(violation.impact ?? "")),
   ).toEqual([]);
-  await page.screenshot({ path: resolve(screenshotDirectory, "flow-en.png"), fullPage: true });
+  await saveSection(page, "Flow", "flow-en.png");
 
   await page.getByRole("group").getByRole("button", { name: "ID" }).click();
   await expect(page.getByRole("heading", { name: "Alur" })).toBeVisible();
   await expect(page.getByTestId("flow-decision-significant")).toHaveText(/Gangguan[\s\S]*Signifikan\?/);
+  await expect(trackingFlow).toContainText("Menunggu persetujuan manusia");
+  await expect(trackingFlow).toContainText("Pantau pengiriman");
+  await expect(trackingFlow).toContainText("Perbarui ETA · inventaris");
+  await expect(trackingFlow).toContainText("Peringatan deviasi");
+  await expect(trackingFlow).toContainText("KPI tercapai");
   const indonesianAxe = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze();
   expect(
     indonesianAxe.violations.filter((violation) => ["critical", "serious"].includes(violation.impact ?? "")),
   ).toEqual([]);
-  await page.screenshot({ path: resolve(screenshotDirectory, "flow-id.png"), fullPage: true });
+  await saveSection(page, "Alur", "flow-id.png");
 });
 
 test("presenter mode auto-runs the weather fixture and advances narration", async ({ page }) => {
