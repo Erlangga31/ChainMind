@@ -2,6 +2,28 @@
 
 > **English summary:** ChainMind is an offline-first, human-approved agentic AI demo for manufacturing supply-chain disruptions. It evaluates inventory risk and alternate suppliers, then prepares—but never automatically executes—a purchase order.
 
+### Ringkasan 30 detik
+
+ChainMind membantu tim manufaktur merespons gangguan pasokan: empat agen menganalisis event,
+stok, dampak produksi dan pemasok alternatif, lalu menyiapkan draf PO untuk ditinjau manusia.
+Pada skenario demo, kapal Microchip X terlambat 5 hari, stok hanya cukup 3 hari, dan Vendor B
+menjadi rekomendasi. Persetujuan manusia wajib sebelum eksekusi; demo menggunakan SAP sandbox
+dan AWS LocalStack/CDK synth, bukan layanan produksi.
+
+### 30-second summary
+
+ChainMind helps manufacturing teams respond to supply disruptions: four agents analyze the event,
+inventory, production impact, and alternate suppliers, then prepare a draft PO for human review.
+In the demo, a Microchip X shipment is delayed five days while stock covers three; Vendor B is
+recommended. Human approval is required before execution. The demo uses an SAP sandbox and
+AWS LocalStack/CDK synthesis, not production services.
+
+**Proposal flow / Alur proposal**
+
+![ChainMind live disruption flow](./docs/screenshots/flow-en.png)
+
+![Alur gangguan ChainMind](./docs/screenshots/flow-id.png)
+
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/Dashboard-React-61DAFB?logo=react&logoColor=20232A)](https://react.dev/)
@@ -69,6 +91,18 @@ flowchart LR
 | Pemilihan dan rationale | Orchestrator Agent, MockLLMClient | Lambda, Bedrock Converse, artefak audit privat di S3 |
 | Approval dan eksekusi | API/dashboard dan mock SAP | Step Functions callback, otorisasi manusia, SAP S/4HANA |
 | Pelacakan pasca-eksekusi | Konfirmasi Ariba, ASN, proyeksi stok terpisah dari stok aktual | Lambda pelacakan, Ariba, custom API proyeksi S/4HANA |
+
+## Jalur cepat Windows
+
+Dengan Python 3.12, Node.js sesuai versi proyek, dan dependensi yang sudah dipasang:
+
+```powershell
+.\scripts\run_all.ps1
+```
+
+Buka `http://127.0.0.1:5173`, masuk `approver` / `demo`, picu skenario cuaca, lalu tinjau dan
+setujui PO. Panduan: [DEMO](./docs/DEMO.md), [REHEARSAL](./docs/REHEARSAL.md), dan
+[Q&A juri](./docs/QNA.md).
 
 Sandbox SAP lokal pada `sandbox/sap_sandbox/` menyediakan endpoint OData V2, metadata EDMX, kontrak JSON Schema di `contracts/sap/`, vendor Ariba, webhook Event Mesh, dan workflow approval simulasi. Uji adapter menggunakan field standar SAP (misalnya `Material`, `Supplier`, `OrderQuantity`, dan `NetPriceAmount`) serta menandai ekstensi `ChainMind*` sebagai custom. Ini adalah contract/sandbox test, bukan koneksi atau tenant SAP produksi. Smoke test tenant opsional didokumentasikan di [DEPLOY.md](./docs/DEPLOY.md); tidak berjalan otomatis dan perlu URL/kredensial SAP yang diberikan pemilik tenant.
 
@@ -360,11 +394,18 @@ Berdasarkan proposal lokal di `docs/reference/ChainMind_Proposal.pdf`, matriks b
 | 23–24 — flow, presenter and replay | Implemented (mock) | [Flow page](./dashboard/src/FlowDiagram.tsx), [replay generator](./scripts/generate_replay_fixture.py), [preflight](./scripts/preflight.py), [video script](./docs/VIDEO_SCRIPT.md) | 15 dashboard tests, 10 Playwright tests including axe, presenter and replay; fixture is read-only |
 | 25 — proposal fidelity | Implemented (locally checkable claims) | [fidelity tests](./tests/test_proposal_fidelity.py), [tracking outputs](./src/chainmind/agents/tracking.py), [coverage](./docs/COVERAGE.md) | backend/API tests and mocked S3 archive; not real AWS/SAP |
 | 26 — account readiness | Implemented (checklist/validator) | [go-live checklist](./docs/GO_LIVE.md), [offline config validation](./scripts/validate_config.py) | validator unit-tested; account verifiers require operator access |
+| Pitch and rehearsal package | Implemented | [ID/EN slides](./docs/slides/), [reproducible builder](./scripts/build_slides.py), [Q&A](./docs/QNA.md), [rehearsal checklist](./docs/REHEARSAL.md) | test verifies 11 slides and speaker notes per deck |
 | 13 — roadmap implementasi dan MVP | Partial | [demo guide](./docs/DEMO.md), [coverage audit](./docs/COVERAGE.md) | demo/sandbox verified; SAP BTP pilot remains a prerequisite |
 | 15 — risk | Partial | [risk register draft](./docs/BUSINESS.md) | documentation-only |
 | 16 — pendanaan / placeholders | Partial | [business draft](./docs/BUSINESS.md) | placeholders; no validated budget |
 
 Lihat [docs/COVERAGE.md](./docs/COVERAGE.md) untuk audit yang lebih rinci serta [docs/BUSINESS.md](./docs/BUSINESS.md) untuk hipotesis bisnis, KPI, dan risiko yang masih bersifat ilustratif.
+
+Materi presentasi: [pitch ID](./docs/slides/ChainMind_Pitch_ID.pptx),
+[pitch EN](./docs/slides/ChainMind_Pitch_EN.pptx), dan [paket bukti juri](./docs/JURY_PACK.md).
+Untuk membangun ulang slide, jalankan `uv run python scripts/build_slides.py`. Baca juga
+[GO_LIVE](./docs/GO_LIVE.md), [DEMO](./docs/DEMO.md), [COVERAGE](./docs/COVERAGE.md),
+dan [Q&A](./docs/QNA.md).
 
 ## Kontribusi
 

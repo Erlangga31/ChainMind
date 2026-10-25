@@ -43,6 +43,7 @@ Bedrock, Cognito/IAS, Teams/Slack/SES, SAP, atau SAP BTP telah diverifikasi seca
 | 24 — presenter and replay | Implemented (offline demo tooling) | `?presenter=1`, [replay generator](../scripts/generate_replay_fixture.py), [replay fixture](../dashboard/public/replay-run.json), [preflight](../scripts/preflight.py), [3-minute video](./VIDEO_SCRIPT.md). | E2E and generator/preflight unit tests; replay is recorded mock data and read-only. |
 | 25 — proposal fidelity and stage 6 outputs | Implemented (locally checkable claims) | [fidelity tests](../tests/test_proposal_fidelity.py), [numbered audit steps](../src/chainmind/core/models.py), [tracking outputs](../src/chainmind/agents/tracking.py), `/kpis`. | Pipeline/API tests and mocked S3 archive assertions; only LocalStack/synth for AWS, sandbox for SAP. |
 | 26 — real-account readiness | Implemented (documentation/validation) | [GO_LIVE.md](./GO_LIVE.md), [offline config validator](../scripts/validate_config.py), [AWS verifier](../scripts/verify_aws_account.py), [SAP verifier](../scripts/verify_sap_tenant.py). | Validator unit-tested; live checks are opt-in and were not run. |
+| Presenter package | Implemented (reproducible) | [Pitch generator](../scripts/build_slides.py), bilingual [PowerPoint decks](./slides/), [jury Q&A](./QNA.md), and [rehearsal checklist](./REHEARSAL.md). | Unit test verifies both decks, 11 slides and speaker notes; no claim of audience/user validation. |
 | 13 — roadmap MVP enam minggu | Partial | Sandbox, API, agents, UI, notifikasi, demo dan testing dijabarkan di [DEMO.md](./DEMO.md). | Implementasi mock lokal terverifikasi; pilot BTP dan runtime layanan nyata belum dikerjakan. |
 | 15 — risiko dan mitigasi | Partial | Risiko salah pilih agen, adopsi, kompleksitas SAP, ketergantungan Bedrock, dan perubahan API dicatat di [BUSINESS.md](./BUSINESS.md). | Documentation-only, cdk-nag synth-only; bukan threat model atau security certification formal. |
 | 16 — pendanaan/sumber daya | Partial | Kategori biaya AWS/SAP, kapasitas tim, dan user validation placeholders tersedia di [BUSINESS.md](./BUSINESS.md). | Tidak ada harga, budget, atau estimasi aktual; semua masih TBD. |
@@ -99,14 +100,12 @@ Bedrock, Cognito/IAS, Teams/Slack/SES, SAP, atau SAP BTP telah diverifikasi seca
 
 ## Validasi dan batas deployment
 
-Validasi lokal final pada branch ini: backend pytest **154 passed, 9 skipped** (tes opt-in seperti
-LocalStack/live SAP tidak dijalankan lokal); dashboard Vitest **15 passed**; Playwright **10 passed**,
-termasuk flow ID/EN, axe, presenter, offline replay dan viewport 375px / 1280px; browser-test
-typecheck dan production build lulus; Ruff lint/format lulus. CDK app synthesis lulus via
-`python infra/app.py`; perintah CLI `cdk` tidak tersedia di PATH. CDK assertions **13 passed** pada
-validasi sebelumnya, tidak diulang pada pass ini. Dependency audit, secret scan, dan pemeriksaan
-Docker yang tercatat sebelumnya bukan bagian dari pass final ini. CI commit release harus diperiksa
-di GitHub.
+Validasi lokal pada presenter-package update: backend pytest **155 passed, 9 skipped** (opt-in
+LocalStack/live SAP suite tidak dijalankan lokal); dashboard Vitest **15 passed**; Playwright
+**10 passed**, termasuk flow ID/EN, axe, presenter, offline replay dan viewport 375px / 1280px;
+browser-test typecheck dan production build lulus; Ruff lint/format lulus. `npx --yes aws-cdk synth`
+lulus dengan virtualenv Python di PATH. CI status per SHA dicatat di GitHub Actions; semua enam job
+untuk commit `b185ba6` sukses, sebelum perubahan slide ini.
 
 CDK synth menargetkan Python 3.12 Linux x86_64 dan memaketkan dependencies. Synthesis tidak
 membuktikan asset dijalankan Lambda. Suppressions cdk-nag yang ada memiliki alasan tertulis; review
