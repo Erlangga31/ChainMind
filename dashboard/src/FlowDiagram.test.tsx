@@ -12,11 +12,16 @@ describe("live proposal flow diagram", () => {
     }
     expect(screen.getByTestId("flow-decision-significant")).toBeInTheDocument();
     expect(screen.getByTestId("flow-decision-approval")).toBeInTheDocument();
+    expect(screen.getByTestId("flow-branch-external-ingestion")).toHaveAttribute("data-active", "true");
+    expect(screen.getByTestId("flow-branch-ingestion-monitoring")).toHaveAttribute("data-active", "true");
     expect(screen.getByTestId("flow-branch-significant-impact")).toHaveAttribute("data-active", "true");
     expect(screen.getByTestId("flow-branch-insignificant-end")).toHaveAttribute("data-active", "false");
     expect(screen.getByText(/Vendor B: 2d · \$135,000 · risk 88/)).toBeInTheDocument();
     expect(screen.getByText(/PENDING_APPROVAL/)).toBeInTheDocument();
-    expect(screen.getByTestId("flow-stage-5")).toHaveTextContent(/5,000 pcs.*\$27\/unit/);
+    expect(screen.getByText("Amazon DynamoDB")).toBeInTheDocument();
+    expect(screen.getAllByText("SAP Ariba Network")).toHaveLength(2);
+    expect(screen.getByTestId("flow-stage-4-po")).toHaveTextContent(/5,000 pcs Microchip X.*\$27\/unit/);
+    expect(screen.getByText(/Monitoring & Tracking/)).toBeInTheDocument();
   });
 
   it("highlights the insignificant no-branch and terminates at Done", () => {
