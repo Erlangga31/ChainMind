@@ -1,0 +1,86 @@
+services:
+  localstack:
+    image: localstack/localstack:3.8.1
+    profiles: ["integration"]
+    environment:
+      SERVICES: events,stepfunctions,dynamodb,s3,sqs,secretsmanager,ses,lambda,logs
+      AWS_DEFAULT_REGION: us-east-1
+      PERSISTENCE: "0"
+    ports:
+      - "4566:4566"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - python
+      - -m
+      - uvicorn
+      - chainmind.api.main:app
+      - --app-dir
+      - src
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    environment:
+      CHAINMIND_MODE: mock
+      CHAINMIND_EVENT_DATABASE_PATH: /app/data/chainmind-events.sqlite3
+      CHAINMIND_EVENT_BRIDGE_SECRET: local-demo-shared-secret
+      CHAINMIND_NOTIFICATION_LINK_SECRET: local-demo-signing-secret-at-least-32-chars
+      CHAINMIND_NOTIFICATION_BACKENDS: '["console"]'
+    ports:
+      - "8000:8000"
+    volumes:
+      - chainmind-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  sap-sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - python
+      - -m
+      - uvicorn
+      - sap_sandbox.main:app
+      - --app-dir
+      - sandbox
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8100"
+    environment:
+      SAP_SANDBOX_EVENT_BRIDGE_SECRET: local-demo-shared-secret
+      SAP_SANDBOX_EVENT_WEBHOOK_URL: http://api:8000/event-bridge
+      SAP_SANDBOX_WORKFLOW_CALLBACK_URL: http://api:8000
+    ports:
+      - "8100:8100"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  dashboard:
+    build:
+      context: dashboard
+      dockerfile: Dockerfile
+    environment:
+      VITE_API_URL: http://localhost:8000
+    ports:
+      - "5173:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  chainmind-data:

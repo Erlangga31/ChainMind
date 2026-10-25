@@ -47,3 +47,12 @@ stock and purchase-order resources under `/sap/opu/odata/sap/`, Ariba sourcing u
 `/ariba/sourcing/`, Event Mesh publishing under `/event-mesh/publish`, and approval tasks under
 `/workflow/tasks`. Supported OData collection options are `$filter` equality, `$select`, and `$top`.
 The OAuth token endpoint issues ephemeral demo tokens; it is not an identity service.
+
+## Selecting SAP and model backends
+
+`CHAINMIND_MODE=mock` remains the offline preset. `CHAINMIND_SAP_BACKEND` independently selects
+`mock`, `sandbox`, or `real`; `CHAINMIND_LLM_BACKEND` selects `mock`, `bedrock`, or
+`bedrock_agents`. When unset, each uses the legacy `CHAINMIND_MODE` preset. `real` SAP clients
+require Integration Suite URL and OAuth settings; AWS mode loads credentials from the configured
+Secrets Manager secret. The `bedrock_agents` selection currently uses the Converse client until the
+agent-runtime adapter is implemented.

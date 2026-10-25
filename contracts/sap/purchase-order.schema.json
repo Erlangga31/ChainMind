@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SAP S/4HANA API_PURCHASEORDER_PROCESS_SRV A_PurchaseOrder OData V2 entity",
+  "description": "PurchaseOrder, PurchaseOrderItem, Supplier, OrderQuantity, NetPriceAmount, and DocumentCurrency follow SAP naming. ChainMindPurchaseOrderId, ChainMindVendorName, ChainMindMaterialName, ChainMindStatus, and ChainMindTerms are explicit sandbox/custom integration fields.",
+  "type": "object",
+  "required": ["d"],
+  "properties": {
+    "d": {
+      "type": "object",
+      "required": ["__metadata", "PurchaseOrder", "PurchaseOrderItem", "Supplier", "Material", "OrderQuantity", "NetPriceAmount", "DocumentCurrency"],
+      "properties": {
+        "__metadata": {"$ref": "#/$defs/metadata"},
+        "PurchaseOrder": {"type": "string"},
+        "PurchaseOrderItem": {"type": "string"},
+        "Supplier": {"type": "string"},
+        "Material": {"type": "string"},
+        "OrderQuantity": {"type": "number"},
+        "NetPriceAmount": {"type": "number"},
+        "DocumentCurrency": {"type": "string", "minLength": 3, "maxLength": 3},
+        "ChainMindPurchaseOrderId": {"type": "string"},
+        "ChainMindVendorName": {"type": "string"},
+        "ChainMindMaterialName": {"type": "string"},
+        "ChainMindStatus": {"type": "string"},
+        "ChainMindTerms": {"type": "string"}
+      },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "required": ["uri", "type"],
+      "properties": {"uri": {"type": "string"}, "type": {"type": "string"}},
+      "additionalProperties": true
+    }
+  }
+}

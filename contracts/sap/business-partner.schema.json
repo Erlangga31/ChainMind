@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SAP S/4HANA API_BUSINESS_PARTNER A_Supplier OData V2 collection",
+  "description": "Supplier is a standard SAP business-partner identifier. VendorName and ChainMind vendor scoring/lead-time fields are custom sourcing extensions; they are not SAP business-partner master data.",
+  "type": "object",
+  "required": ["d"],
+  "properties": {
+    "d": {
+      "type": "object",
+      "required": ["results"],
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["__metadata", "Supplier"],
+            "properties": {
+              "__metadata": {"$ref": "#/$defs/metadata"},
+              "Supplier": {"type": "string"},
+              "SupplierName": {"type": "string"},
+              "VendorName": {"type": "string", "description": "ChainMind sandbox compatibility field."},
+              "LeadTimeDays": {"type": "number", "description": "ChainMind supplier-quote extension."},
+              "NetPriceAmount": {"type": "number", "description": "Quote total, supplied by the custom sourcing adapter."},
+              "DocumentCurrency": {"type": "string"},
+              "Capacity": {"type": "number", "description": "ChainMind supplier-quote extension."},
+              "RiskScore": {"type": "integer", "description": "ChainMind supplier-quote extension."}
+            },
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "required": ["uri", "type"],
+      "properties": {"uri": {"type": "string"}, "type": {"type": "string"}},
+      "additionalProperties": true
+    }
+  }
+}

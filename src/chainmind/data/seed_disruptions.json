@@ -1,0 +1,42 @@
+[
+  {
+    "title": "Extreme weather delays cargo ship",
+    "description": "Severe weather has delayed the vessel carrying Microchip X by five days.",
+    "component_id": "microchip-x",
+    "component_name": "Microchip X",
+    "delay_days": 5,
+    "event_type": "weather",
+    "idempotency_key": "demo-weather-delay-microchip-x",
+    "source": "port-weather-monitor"
+  },
+  {
+    "title": "Port congestion delays shipment",
+    "description": "Port congestion has delayed the Microchip X shipment by four days.",
+    "component_id": "microchip-x",
+    "component_name": "Microchip X",
+    "delay_days": 4,
+    "event_type": "logistics_delay",
+    "idempotency_key": "demo-logistics-delay-microchip-x",
+    "source": "port-operations-feed"
+  },
+  {
+    "title": "Geopolitical border closure",
+    "description": "A border closure has delayed the overland route carrying Microchip X by six days.",
+    "component_id": "microchip-x",
+    "component_name": "Microchip X",
+    "delay_days": 6,
+    "event_type": "geopolitical",
+    "idempotency_key": "demo-geopolitical-delay-microchip-x",
+    "source": "geopolitical-risk-feed"
+  },
+  {
+    "title": "Supplier factory shutdown",
+    "description": "A factory incident stopped shipments from the primary Microchip X supplier.",
+    "component_id": "microchip-x",
+    "component_name": "Microchip X",
+    "delay_days": 7,
+    "event_type": "vendor_failure",
+    "idempotency_key": "demo-vendor-failure-microchip-x",
+    "source": "supplier-risk-monitor"
+  }
+]

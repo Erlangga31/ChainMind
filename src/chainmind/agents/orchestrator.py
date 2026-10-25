@@ -1,5 +1,7 @@
 """Orchestrator agent for economic selection and draft purchase orders."""
 
+from datetime import date, timedelta
+
 from chainmind.core.errors import ChainMindError
 from chainmind.core.models import (
     InventorySnapshot,
@@ -7,6 +9,7 @@ from chainmind.core.models import (
     OrchestratorResult,
     ProcurementResult,
     PurchaseOrder,
+    ReasoningTraceStep,
     VendorEvaluation,
 )
 from chainmind.integrations.llm.base import LLMClient
@@ -24,6 +27,7 @@ class OrchestratorAgent:
         logistics: LogisticsResult,
         *,
         vendor_id: str | None = None,
+        run_id: str | None = None,
     ) -> OrchestratorResult:
         """Select the best economic option, optionally honoring a revision request."""
 
@@ -48,20 +52,38 @@ class OrchestratorAgent:
                 feasible,
                 key=lambda item: (item.risk_adjusted_total, item.vendor.risk_score),
             )
-        reasoning = self._llm.explain_vendor_choice(
+        explanation = self._llm.explain_vendor_choice(
             selected=selected,
             alternatives=feasible,
             cost_of_inaction=logistics.cost_of_inaction,
+            run_id=run_id,
         )
+        trace = [
+            ReasoningTraceStep(
+                source="SAP S/4HANA",
+                text=(
+                    "Cost of inaction was computed from stock coverage and production-loss "
+                    "inputs by deterministic Python logic."
+                ),
+            ),
+            ReasoningTraceStep(
+                source="SAP Ariba",
+                text=f"Python evaluated {len(feasible)} feasible supplier offers.",
+            ),
+            *explanation.trace,
+        ]
         return OrchestratorResult(
             agent="orchestrator",
             summary=(
                 f"Selected {selected.vendor.vendor_name} at "
                 f"${selected.risk_adjusted_total:,.0f} risk-adjusted total."
             ),
-            reasoning=reasoning,
+            reasoning=explanation.text,
             selected_vendor=selected,
             cost_of_inaction=logistics.cost_of_inaction,
+            trace=trace,
+            fallback_used=explanation.fallback_used,
+            fallback_reason=explanation.fallback_reason,
         )
 
     @staticmethod
@@ -82,4 +104,5 @@ class OrchestratorAgent:
             total_price=unit_price * quantity,
             currency=inventory.currency,
             terms=inventory.purchase_terms,
+            expected_date=date.today() + timedelta(days=selected.vendor.lead_time_days),
         )

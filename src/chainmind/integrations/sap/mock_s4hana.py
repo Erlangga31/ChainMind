@@ -1,9 +1,16 @@
 """In-memory SAP S/4HANA adapter backed by packaged JSON seed data."""
 
+import json
 from importlib.resources import files
 
 from chainmind.core.errors import IntegrationError
-from chainmind.core.models import InventorySnapshot, PurchaseOrder
+from chainmind.core.models import (
+    AffectedSupplyChainRecords,
+    DisruptionEvent,
+    InventoryProjection,
+    InventorySnapshot,
+    PurchaseOrder,
+)
 
 
 class MockSAPS4HANAClient:
@@ -12,12 +19,30 @@ class MockSAPS4HANAClient:
     def __init__(self) -> None:
         self._inventory: dict[str, InventorySnapshot] = {}
         self._orders: dict[str, PurchaseOrder] = {}
+        self._supply_chain_records: dict[str, dict[str, list[str]]] = {}
+        self._projections: dict[str, InventoryProjection] = {}
         self._load_inventory()
+        raw_records = (
+            files("chainmind.data")
+            .joinpath("seed_supply_chain_records.json")
+            .read_text(encoding="utf-8")
+        )
+        self._supply_chain_records = json.loads(raw_records)
 
     def _load_inventory(self) -> None:
         raw = files("chainmind.data").joinpath("seed_inventory.json").read_text(encoding="utf-8")
-        snapshot = InventorySnapshot.model_validate_json(raw)
-        self._inventory[snapshot.component_id] = snapshot
+        initial_data = json.loads(raw)
+        initial_items = initial_data if isinstance(initial_data, list) else [initial_data]
+        snapshots = [InventorySnapshot.model_validate(item) for item in initial_items]
+        additional_raw = (
+            files("chainmind.data")
+            .joinpath("seed_additional_inventory.json")
+            .read_text(encoding="utf-8")
+        )
+        snapshots.extend(
+            InventorySnapshot.model_validate(item) for item in json.loads(additional_raw)
+        )
+        self._inventory.update({snapshot.component_id: snapshot for snapshot in snapshots})
 
     def get_inventory(self, component_id: str) -> InventorySnapshot:
         """Return an OData-like inventory record."""
@@ -29,6 +54,25 @@ class MockSAPS4HANAClient:
                 f"SAP S/4HANA has no seeded inventory for component '{component_id}'.",
                 details={"component_id": component_id},
             ) from exc
+
+    def find_affected_records(self, event: DisruptionEvent) -> AffectedSupplyChainRecords:
+        """Match a disruption to seeded shipment and locally drafted order records."""
+
+        seeded = self._supply_chain_records.get(event.component_id, {})
+        open_orders = [
+            *seeded.get("open_purchase_order_ids", []),
+            *[
+                order.po_id.hex
+                for order in self._orders.values()
+                if order.component_id == event.component_id
+                and order.status not in {"EXECUTED", "REJECTED"}
+            ],
+        ]
+        return AffectedSupplyChainRecords(
+            component_id=event.component_id,
+            shipment_ids=seeded.get("shipment_ids", []),
+            open_purchase_order_ids=sorted(set(open_orders)),
+        )
 
     def create_draft_purchase_order(self, order: PurchaseOrder) -> PurchaseOrder:
         """Store a draft PO without triggering downstream financial execution."""
@@ -56,3 +100,14 @@ class MockSAPS4HANAClient:
 
         order = self._orders.get(po_id)
         return order.model_copy(deep=True) if order else None
+
+    def record_inventory_projection(self, projection: InventoryProjection) -> None:
+        """Save an illustrative future stock projection without changing current stock."""
+
+        self._projections[projection.component_id] = projection.model_copy(deep=True)
+
+    def get_inventory_projection(self, component_id: str) -> InventoryProjection | None:
+        """Return a copy of the latest projected replenishment snapshot."""
+
+        projection = self._projections.get(component_id)
+        return projection.model_copy(deep=True) if projection else None

@@ -7,7 +7,8 @@
     "component_name": "Microchip X",
     "delay_days": 5,
     "source": "port-weather-monitor",
-    "event_type": "weather"
+    "event_type": "weather",
+    "idempotency_key": "sandbox-weather-delay"
   },
   {
     "scenario_id": "border-closure",
@@ -17,7 +18,8 @@
     "component_name": "Microchip X",
     "delay_days": 6,
     "source": "geopolitical-risk-feed",
-    "event_type": "geopolitical"
+    "event_type": "geopolitical",
+    "idempotency_key": "sandbox-border-closure"
   },
   {
     "scenario_id": "vendor-failure",
@@ -27,7 +29,8 @@
     "component_name": "Microchip X",
     "delay_days": 7,
     "source": "supplier-risk-monitor",
-    "event_type": "vendor_failure"
+    "event_type": "vendor_failure",
+    "idempotency_key": "sandbox-vendor-failure"
   },
   {
     "scenario_id": "port-congestion",
@@ -37,6 +40,7 @@
     "component_name": "Microchip X",
     "delay_days": 4,
     "source": "port-operations-feed",
-    "event_type": "port_congestion"
+    "event_type": "logistics_delay",
+    "idempotency_key": "sandbox-port-congestion"
   }
 ]

@@ -1,0 +1,16 @@
+{
+  "openapi": "3.0.1",
+  "info": {"title": "ChainMind inventory action", "version": "1.0.0"},
+  "paths": {
+    "/get_inventory": {
+      "post": {
+        "operationId": "get_inventory",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object", "properties": {"component_id": {"type": "string"}}, "required": ["component_id"]}}}
+        },
+        "responses": {"200": {"description": "Validated SAP inventory snapshot"}}
+      }
+    }
+  }
+}

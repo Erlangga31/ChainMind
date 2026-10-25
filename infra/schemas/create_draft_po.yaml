@@ -1,0 +1,16 @@
+{
+  "openapi": "3.0.1",
+  "info": {"title": "ChainMind draft purchase-order action", "version": "1.0.0"},
+  "paths": {
+    "/create_draft_po": {
+      "post": {
+        "operationId": "create_draft_po",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object", "properties": {"selected_vendor": {"type": "object"}, "inventory": {"type": "object"}}, "required": ["selected_vendor", "inventory"]}}}
+        },
+        "responses": {"200": {"description": "Draft PO requiring human approval"}}
+      }
+    }
+  }
+}

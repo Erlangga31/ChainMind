@@ -1,27 +1,44 @@
 # Skrip demo ChainMind untuk juri
 
-Durasi yang disarankan: **4–6 menit**. Demo berjalan offline dengan adapter mock; gunakan hanya data fixture yang disediakan.
+Durasi yang disarankan: **5 menit**. Demo berjalan offline dengan adapter mock; gunakan hanya data fixture yang disediakan.
+
+| Waktu | Fokus |
+| --- | --- |
+| 0:00–0:45 | Gangguan cuaca, coverage stok, dan severity |
+| 0:45–1:45 | Linimasa enam tahap, impact panel, dan perbandingan vendor |
+| 1:45–2:30 | Chain of Thought trace, source labels, dan draft PO |
+| 2:30–3:30 | Feed notifikasi, role viewer/approver, dan konfirmasi approval |
+| 3:30–4:30 | Eksekusi mock, konfirmasi Ariba, ASN, ETA, dan tracking |
+| 4:30–5:00 | KPI ilustratif, batas verifikasi, dan langkah produksi |
 
 ## Persiapan sebelum presentasi
 
-1. Jalankan `uv sync --extra dev`.
-2. Terminal pertama: `uv run uvicorn chainmind.api.main:app --app-dir src --reload`.
-3. Terminal kedua: `cd dashboard`, `npm ci`, lalu `npm run dev`.
-4. Buka dashboard di URL Vite dan pastikan label **LOCAL · MOCK MODE** terlihat.
-5. Bila API/UI bermasalah saat presentasi, jalankan `uv run python scripts/run_demo.py` untuk demo CLI alternatif.
+1. Jalankan `uv sync --extra dev` dan `cd dashboard; npm ci`.
+2. Dari root, jalankan `.\scripts\run_all.ps1` (Windows) atau `uv run python scripts/run_all.py`.
+   Launcher menjalankan `scripts/preflight.py` lebih dulu untuk memeriksa port, versi Python/Node,
+   dependensi lokal, fixture, dan akun demo OIDC; semua pemeriksaan bersifat lokal.
+3. Tunggu pesan siap, lalu buka `http://127.0.0.1:5173`. API, sandbox SAP/OIDC, dan Vite berjalan lokal dalam mock mode; tidak membutuhkan AWS/SAP atau akses internet saat demo.
+4. Masuk sebagai `approver` dengan password `demo`. Bahasa awal dashboard Indonesia; kontrol `EN`
+   mengganti dashboard ke Inggris. Ini fake OIDC sandbox, bukan login ke SAP IAS/Cognito produksi.
+5. Untuk menghentikan semua proses gunakan `Ctrl+C` di terminal launcher.
 
 ## Alur presentasi
 
-1. **Jelaskan gangguan:** kapal Microchip X terlambat 5 hari karena cuaca ekstrem; stok yang tersedia hanya menutup 3 hari produksi.
-2. Klik **Trigger demo disruption**. Run yang baru akan muncul di panel kiri.
-3. Tunjukkan linimasa: Monitoring mengklasifikasikan severity **High**; Logistics menghitung cakupan 3 hari, potensi stockout 2 hari, dan estimasi kerugian akibat tidak bertindak sebesar **$200.000**.
-4. Buka tabel vendor: ada empat alternatif. Bandingkan harga saja dengan waktu kirim, kapasitas, dan risiko residual—Vendor yang termurah tidak otomatis paling ekonomis.
-5. Tunjukkan Orchestrator memilih **Vendor B**: lead time 2 hari, $135.000 action cost, dan tidak ada residual stockout pada fixture; alternatif layak berikutnya Vendor A memiliki biaya tersesuaikan risiko $139.500.
-6. Baca **Chain of Thought summary** sebagai ringkasan keputusan audit: bukti yang digunakan, risiko stockout, perbandingan pemasok, biaya inaction vs action, dan alasan rekomendasi.
-7. Tunjukkan draf SAP S/4HANA: **Vendor B**, Microchip X, **5.000 pcs**, **$27/pcs**, total **$135.000**, **Air Freight**, `PENDING_APPROVAL`.
-8. Tekankan gerbang human-in-the-loop: tidak ada order yang dijalankan hanya karena agent merekomendasikannya.
-9. Untuk demonstrasi aman, masukkan catatan lalu tekan **Revise vendor** dan pilih Vendor A. Draf berubah, catatan revisi tercatat, tetapi status tetap `PENDING_APPROVAL`.
-10. Pilih apakah ingin **Reject** untuk membuktikan tidak ada eksekusi, atau **Approve & execute** untuk memperlihatkan jalur persetujuan eksplisit pada mock SAP. Approval menghasilkan nomor referensi mock dan audit entry manusia.
+1. **Narasi masalah:** kapal pengangkut Microchip X tertunda **5 hari** karena cuaca ekstrem; stok SAP S/4HANA hanya mencakup **3 hari** produksi.
+2. Login dengan `approver` / `demo`. Dalam bahasa Indonesia, panel skenario menampilkan **Cuaca ekstrem**; tekan **Picu gangguan demo**.
+3. Baca feed notifikasi berbahasa Indonesia yang menyebut Microchip X terlambat 5 hari, stok cukup 3 hari, dan rekomendasi Vendor B $135.000. Tombol **Setujui** tetap meminta review dan konfirmasi eksplisit.
+4. Tunjukkan enam tahap dan panel dampak: severity **High**, coverage **3 hari**, stockout tanpa tindakan **2 hari**, biaya inaction ilustratif **$200.000**.
+5. Pada tabel vendor dan grafik, bandingkan empat pilihan. **Vendor B** tiba dalam **2 hari**; Vendor A $120.000/3 hari, Vendor C $110.000/4 hari, Vendor D $100.000/5 hari. Harga terendah tidak selalu memiliki biaya total terendah.
+6. Tunjukkan **Chain of Thought summary** dan sumber SAP S/4HANA, SAP Ariba, serta Amazon Bedrock mock; hitungan ekonomi tetap deterministik di Python.
+7. Pastikan PO berstatus **PENDING_APPROVAL**: Vendor B, **5.000 pcs**, **$27/pcs**, total **$135.000**, terms **Air Freight**.
+8. Klik **Setujui** di feed (atau **Tinjau persetujuan** di kartu PO). Dialog muncul; tandai checkbox konfirmasi lalu tekan **Konfirmasi keputusan**. Tidak ada tindakan finansial yang terjadi sebelum konfirmasi.
+9. Verifikasi **Eksekusi & pelacakan**: eksekusi SAP mock, konfirmasi pemasok, ASN/ETA **2 hari**, dan proyeksi stok. Tegaskan ini simulasi lokal, bukan transaksi SAP nyata.
+10. Klik tab **KPI**. Label halaman menyebut angka sebagai *ilustratif/simulasi*; KPI bukan hasil produksi atau forecast.
+11. Penutup: dashboard, IdP, SAP S/4HANA, Ariba, Event Mesh, dan PO adapter adalah sandbox/mock. Tidak ada AWS deployment atau akun SAP yang digunakan.
+
+## Fallback jika jaringan terganggu
+
+Launcher memakai localhost dan adapter mock; ia tidak memerlukan layanan cloud. Bila dashboard atau browser gagal, jalankan `uv run python scripts/run_demo.py` (Indonesia) atau `uv run python scripts/run_demo.py --language en` dari root untuk enam tahap, perbandingan vendor, Chain of Thought, draf PO, audit, dan status approval yang sama. Screenshot lokal di bawah `docs/screenshots/` dapat dipakai untuk menjelaskan tampilan, bukan sebagai bukti transaksi produksi.
 
 ## Rationale fixture demo
 
@@ -34,3 +51,22 @@ Durasi yang disarankan: **4–6 menit**. Demo berjalan offline dengan adapter mo
 - Draf Vendor B = `5.000 × $27 = $135.000`, `PENDING_APPROVAL`.
 
 Angka adalah hasil dataset demo dan asumsi mock, bukan penawaran SAP Ariba atau rekomendasi pengadaan yang tervalidasi produksi.
+
+## Mode presenter dan replay
+
+- Untuk presenter, buka `http://127.0.0.1:5173/?presenter=1` sebelum login approver. Setelah login,
+  ChainMind otomatis memicu fixture cuaca dan membuka Flow. Tombol **Lanjut / Next** menggerakkan
+  narasi enam bagian yang mengikuti urutan naskah ini; mode ini menyembunyikan menu administrasi.
+- Jalankan `uv run python scripts/generate_replay_fixture.py` untuk membangun ulang
+  `dashboard/public/replay-run.json` dari pipeline mock kanonis. Jangan menyunting hasil JSON secara
+  manual; gunakan ulang skrip dan uji `tests/test_replay_fixture.py`.
+- Jika API tidak terjangkau sementara dashboard dan sandbox OIDC masih hidup, login lalu pilih
+  **Muat replay rekaman / Load recorded replay** pada banner error. UI memberi penanda **REPLAY**,
+  menampilkan jalur stage bertahap, dan menonaktifkan trigger/approval karena fixture hanya-baca.
+- Periksa prasyarat dengan `uv run python scripts/preflight.py`; untuk validasi konfigurasi offline,
+  gunakan `uv run python scripts/validate_config.py --mode mock`.
+
+## Naskah presenter tiga menit
+
+Naskah bertimestamp dan tindakan layar yang tepat tersedia di
+[VIDEO_SCRIPT.md](./VIDEO_SCRIPT.md). Semua angka di halaman KPI dan fixture bersifat simulasi/ilustratif.

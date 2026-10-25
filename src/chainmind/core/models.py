@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum
+from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from chainmind.workflow.definition import WorkflowState
 
 
 class DomainModel(BaseModel):
@@ -22,6 +25,15 @@ class Severity(StrEnum):
     MEDIUM = "Medium"
     HIGH = "High"
     CRITICAL = "Critical"
+
+
+class DisruptionType(StrEnum):
+    """Supported external disruption classes."""
+
+    WEATHER = "weather"
+    LOGISTICS_DELAY = "logistics_delay"
+    GEOPOLITICAL = "geopolitical"
+    VENDOR_FAILURE = "vendor_failure"
 
 
 class RunStatus(StrEnum):
@@ -48,13 +60,33 @@ class DisruptionEvent(DomainModel):
     """External supply-chain disruption supplied by an operator or event source."""
 
     event_id: UUID = Field(default_factory=uuid4)
+    tenant_id: str = Field(default="demo", min_length=1, max_length=100)
     title: str = Field(min_length=3, max_length=160)
     description: str = Field(min_length=3, max_length=2_000)
     component_id: str = Field(default="microchip-x", min_length=1, max_length=100)
     component_name: str = Field(default="Microchip X", min_length=1, max_length=160)
     delay_days: float = Field(gt=0, le=365)
+    event_type: DisruptionType | None = None
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
+    affected_component_ids: list[str] = Field(default_factory=list)
+    language: Literal["id", "en"] = "id"
     source: str = Field(default="external-logistics", max_length=100)
     occurred_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @property
+    def dedupe_key(self) -> str:
+        """Return a caller key or stable event identifier for duplicate detection."""
+
+        return self.idempotency_key or str(self.event_id)
+
+
+class AffectedSupplyChainRecords(DomainModel):
+    """SAP shipment and open-order records associated with a component."""
+
+    component_id: str
+    shipment_ids: list[str] = Field(default_factory=list)
+    open_purchase_order_ids: list[str] = Field(default_factory=list)
+    source: str = "SAP S/4HANA"
 
 
 class InventorySnapshot(DomainModel):
@@ -68,6 +100,7 @@ class InventorySnapshot(DomainModel):
     purchase_quantity: int = Field(gt=0)
     currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
     purchase_terms: str = Field(default="Air Freight")
+    plant_region: str = "Unknown"
 
 
 class Vendor(DomainModel):
@@ -82,6 +115,8 @@ class Vendor(DomainModel):
     capacity: int = Field(gt=0)
     expedite_cost: float = Field(default=0, ge=0)
     freight_cost: float = Field(default=0, ge=0)
+    region: str = "Unknown"
+    distance_km: float = Field(default=0, ge=0)
 
 
 class VendorEvaluation(DomainModel):
@@ -94,6 +129,37 @@ class VendorEvaluation(DomainModel):
     residual_stockout_loss: float
     risk_adjusted_total: float
     rationale: str
+    same_region: bool = False
+    capacity_sufficient: bool = True
+    meets_deadline: bool = True
+
+
+class MaterialImpact(DomainModel):
+    """Impact of one BOM component in the disrupted production supply chain."""
+
+    component_id: str
+    component_name: str
+    coverage_days: float = Field(ge=0)
+    stockout_days: float = Field(ge=0)
+    cost_of_inaction: float = Field(ge=0)
+    critical: bool = False
+
+
+class ReasoningTraceStep(DomainModel):
+    """One attributed reasoning or evidence item for the run timeline."""
+
+    source: str
+    text: str = Field(min_length=1)
+
+
+class LLMExplanation(DomainModel):
+    """Validated explanation and provider trace returned by a language adapter."""
+
+    text: str = Field(min_length=1)
+    trace: list[ReasoningTraceStep] = Field(default_factory=list)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    fallback_used: bool = False
+    fallback_reason: str | None = None
 
 
 class AgentResult(DomainModel):
@@ -110,6 +176,8 @@ class MonitoringResult(AgentResult):
     severity: Severity
     significant: bool
     coverage_days: float
+    disruption_type: DisruptionType
+    affected_records: AffectedSupplyChainRecords
 
 
 class LogisticsResult(AgentResult):
@@ -132,6 +200,9 @@ class OrchestratorResult(AgentResult):
 
     selected_vendor: VendorEvaluation
     cost_of_inaction: float
+    trace: list[ReasoningTraceStep] = Field(default_factory=list)
+    fallback_used: bool = False
+    fallback_reason: str | None = None
 
 
 class AuditEntry(DomainModel):
@@ -142,6 +213,7 @@ class AuditEntry(DomainModel):
     input_summary: str
     output_summary: str
     reasoning: str
+    proposal_step: int | None = Field(default=None, ge=1, le=8)
 
 
 class StageResult(DomainModel):
@@ -167,22 +239,174 @@ class PurchaseOrder(DomainModel):
     total_price: float = Field(gt=0)
     currency: str = "USD"
     terms: str = "Air Freight"
+    expected_date: date | None = None
     status: str = "PENDING_APPROVAL"
+
+
+class VendorConfirmation(DomainModel):
+    """Supplier confirmation returned after an approved order is submitted."""
+
+    confirmation_status: str
+    confirmed_quantity: int = Field(ge=0)
+    note: str = ""
+
+
+class ShipmentTracking(DomainModel):
+    """Vendor advance-shipment notice and estimated arrival."""
+
+    tracking_id: str
+    status: str
+    estimated_arrival: date
+    note: str = ""
+
+
+class InventoryProjection(DomainModel):
+    """Illustrative projected stock at the confirmed replenishment date."""
+
+    component_id: str
+    current_stock: int = Field(ge=0)
+    daily_consumption: int = Field(gt=0)
+    confirmed_receipt_quantity: int = Field(ge=0)
+    expected_arrival: date
+    projected_stock_at_arrival: int = Field(ge=0)
+    projected_coverage_days: float = Field(ge=0)
+    source: str = "ChainMind simulation"
+
+
+class TrackingMonitoringOutput(DomainModel):
+    """One explicit stage-6 monitoring signal surfaced through the API."""
+
+    kind: Literal["shipment", "eta", "inventory", "deviation", "kpi"]
+    status: str
+    summary: str
+
+
+class ExecutionTracking(DomainModel):
+    """Post-approval execution, supplier, shipment, and projection result."""
+
+    sap_reference: str
+    ariba_reference: str
+    confirmation: VendorConfirmation
+    shipment: ShipmentTracking
+    inventory_projection: InventoryProjection
+    line_stoppage_avoided: bool
+    eta_deviation_days: float = Field(ge=0)
+    alert: str | None = None
+    monitoring_outputs: list[TrackingMonitoringOutput] = Field(default_factory=list)
+    simulated: bool = True
+
+
+class RunKPI(DomainModel):
+    """Per-run illustrative response economics, explicitly not a forecast."""
+
+    simulated: bool = True
+    cost_of_inaction: float = Field(ge=0)
+    action_cost: float = Field(ge=0)
+    illustrative_savings: float
+    line_stoppage_avoided: bool
+    estimated_stockout_days_avoided: float = Field(ge=0)
+    response_time_seconds: float | None = Field(default=None, ge=0)
+
+
+class KPIComparison(DomainModel):
+    """Manual-versus-ChainMind comparison with provenance for each value."""
+
+    metric: str
+    unit: str
+    manual_baseline: float | None
+    chainmind_value: float | None
+    manual_is_illustrative: bool
+    chainmind_is_illustrative: bool
+
+
+class KPIReport(DomainModel):
+    """Aggregate illustrative KPIs for tracked disruption runs."""
+
+    simulated: bool = False
+    label: str = "Values are simulated or illustrative; not a financial forecast."
+    tracked_runs: int = Field(ge=0)
+    executed_runs: int = Field(ge=0)
+    line_stoppages_avoided: int = Field(ge=0)
+    illustrative_cost_of_inaction: float = Field(ge=0)
+    illustrative_action_cost: float = Field(ge=0)
+    illustrative_savings: float
+    comparison: list[KPIComparison] = Field(default_factory=list)
+
+
+class UsageReport(DomainModel):
+    """Illustrative tenant usage and first-invoice estimate."""
+
+    tenant_id: str
+    period_start: date
+    plan_tier: Literal["Starter", "Professional", "Enterprise"]
+    resolved_disruptions: int = Field(ge=0)
+    included_disruptions: int = Field(ge=0)
+    active_agents: int = Field(ge=0)
+    included_agents: int = Field(ge=0)
+    monthly_subscription_fee: float = Field(ge=0)
+    disruption_overage_fee: float = Field(ge=0)
+    additional_agent_fee: float = Field(ge=0)
+    one_time_onboarding_fee: float = Field(ge=0)
+    illustrative_monthly_estimate: float = Field(ge=0)
+    illustrative_first_invoice_estimate: float = Field(ge=0)
+    illustrative: bool = True
+    label: str = "Illustrative estimate only; not a quote or invoice."
+
+
+class NotificationMessage(DomainModel):
+    """Rendered alert and signed actions dispatched to configured channels."""
+
+    run_id: UUID
+    event_kind: str
+    subject: str
+    text: str
+    approve_url: str
+    view_url: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class NotificationLinkPayload(DomainModel):
+    """Short-lived signed action link claims."""
+
+    run_id: UUID
+    tenant_id: str = "demo"
+    action: Literal["approve", "view"]
+    expires_at: int = Field(gt=0)
+
+
+class NotificationApprovalRequest(DomainModel):
+    """Explicit confirmation required after opening a signed approval link."""
+
+    confirmed: bool
+    note: str = Field(default="", max_length=1_000)
 
 
 class DisruptionRun(DomainModel):
     """Persisted result of one disruption analysis."""
 
     run_id: UUID = Field(default_factory=uuid4)
+    tenant_id: str = Field(default="demo", min_length=1, max_length=100)
     event: DisruptionEvent
     status: RunStatus = RunStatus.ANALYZING
+    workflow_state: WorkflowState = WorkflowState.INGESTED
+    revision_count: int = Field(default=0, ge=0)
     severity: Severity | None = None
     significant: bool = False
+    affected_records: AffectedSupplyChainRecords | None = None
     stages: list[StageResult] = Field(default_factory=list)
     vendor_comparison: list[VendorEvaluation] = Field(default_factory=list)
     selected_vendor_id: str | None = None
     chain_of_thought: list[str] = Field(default_factory=list)
+    trace_steps: list[ReasoningTraceStep] = Field(default_factory=list)
     draft_po: PurchaseOrder | None = None
+    cost_of_inaction: float = Field(default=0, ge=0)
+    execution_tracking: ExecutionTracking | None = None
+    kpis: RunKPI | None = None
+    inventory_snapshot: InventorySnapshot | None = None
+    material_impacts: list[MaterialImpact] = Field(default_factory=list)
+    approval_overdue_notified: bool = False
+    workflow_task_id: str | None = None
+    last_decision: DecisionRequest | None = None
     audit_log: list[AuditEntry] = Field(default_factory=list)
     error: str | None = None
     revision_note: str | None = None

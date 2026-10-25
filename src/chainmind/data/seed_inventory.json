@@ -6,5 +6,6 @@
   "line_stoppage_cost_per_day": 100000,
   "purchase_quantity": 5000,
   "currency": "USD",
-  "purchase_terms": "Air Freight"
+  "purchase_terms": "Air Freight",
+  "plant_region": "West Java"
 }

@@ -1,0 +1,320 @@
+{
+  "run_id": "ca713bce-6b6a-43ec-bb24-735324305e30",
+  "tenant_id": "demo",
+  "event": {
+    "event_id": "ce96cef4-6fd1-4456-b32f-c5c14e0515c6",
+    "tenant_id": "demo",
+    "title": "Extreme weather delays cargo ship",
+    "description": "Severe weather has delayed the vessel carrying Microchip X by five days.",
+    "component_id": "microchip-x",
+    "component_name": "Microchip X",
+    "delay_days": 5.0,
+    "event_type": null,
+    "idempotency_key": null,
+    "affected_component_ids": [],
+    "language": "id",
+    "source": "port-weather-monitor",
+    "occurred_at": "2026-10-25T05:23:33.352655Z"
+  },
+  "status": "PENDING_APPROVAL",
+  "workflow_state": "HUMAN_APPROVAL",
+  "revision_count": 0,
+  "severity": "High",
+  "significant": true,
+  "affected_records": {
+    "component_id": "microchip-x",
+    "shipment_ids": [
+      "SHIP-MICROCHIP-X-001"
+    ],
+    "open_purchase_order_ids": [
+      "4500000001"
+    ],
+    "source": "SAP S/4HANA"
+  },
+  "stages": [
+    {
+      "name": "Monitoring",
+      "status": "COMPLETED",
+      "summary": "High severity; 5-day delay versus 3 days of stock coverage.",
+      "completed_at": "2026-10-25T05:23:33.386731Z"
+    },
+    {
+      "name": "Logistics",
+      "status": "COMPLETED",
+      "summary": "Evaluated 1 affected materials; Microchip X is most critical. 3,000 units cover 3 days; estimated stockout is 2 days ($200,000).",
+      "completed_at": "2026-10-25T05:23:33.387827Z"
+    },
+    {
+      "name": "Procurement",
+      "status": "COMPLETED",
+      "summary": "Compared 4 vendors; 3 are feasible.",
+      "completed_at": "2026-10-25T05:23:33.388985Z"
+    },
+    {
+      "name": "Orchestrator",
+      "status": "COMPLETED",
+      "summary": "Selected Vendor B at $135,000 risk-adjusted total.",
+      "completed_at": "2026-10-25T05:23:33.391457Z"
+    },
+    {
+      "name": "Human approval",
+      "status": "PENDING",
+      "summary": "A human decision is required before purchase-order execution.",
+      "completed_at": "2026-10-25T05:23:33.391466Z"
+    },
+    {
+      "name": "PO execution",
+      "status": "WAITING_FOR_APPROVAL",
+      "summary": "No PO has been executed.",
+      "completed_at": "2026-10-25T05:23:33.391474Z"
+    },
+    {
+      "name": "Execution & tracking",
+      "status": "WAITING_FOR_APPROVAL",
+      "summary": "Supplier confirmation and shipment tracking start after approval.",
+      "completed_at": "2026-10-25T05:23:33.391482Z"
+    }
+  ],
+  "vendor_comparison": [
+    {
+      "vendor": {
+        "vendor_id": "vendor-b",
+        "vendor_name": "Vendor B",
+        "lead_time_days": 2.0,
+        "total_cost": 135000.0,
+        "currency": "USD",
+        "risk_score": 88,
+        "capacity": 8000,
+        "expedite_cost": 0.0,
+        "freight_cost": 0.0,
+        "region": "West Java",
+        "distance_km": 125.0
+      },
+      "feasible": true,
+      "action_cost": 135000.0,
+      "residual_stockout_days": 0.0,
+      "residual_stockout_loss": 0.0,
+      "risk_adjusted_total": 135000.0,
+      "rationale": "Vendor B: $135,000 landed action cost plus $0 risk-adjusted residual loss (0 reserve-adjusted stockout days); 125 km from the plant in West Java; same-region sourcing; capacity sufficient; meets coverage deadline; feasible.",
+      "same_region": true,
+      "capacity_sufficient": true,
+      "meets_deadline": true
+    },
+    {
+      "vendor": {
+        "vendor_id": "vendor-c",
+        "vendor_name": "Vendor C",
+        "lead_time_days": 4.0,
+        "total_cost": 110000.0,
+        "currency": "USD",
+        "risk_score": 70,
+        "capacity": 12000,
+        "expedite_cost": 0.0,
+        "freight_cost": 0.0,
+        "region": "Central Java",
+        "distance_km": 420.0
+      },
+      "feasible": true,
+      "action_cost": 110000.0,
+      "residual_stockout_days": 1.25,
+      "residual_stockout_loss": 87500.0,
+      "risk_adjusted_total": 197500.0,
+      "rationale": "Vendor C: $110,000 landed action cost plus $87,500 risk-adjusted residual loss (1.25 reserve-adjusted stockout days); 420 km from the plant in Central Java; cross-region sourcing; capacity sufficient; misses coverage deadline; feasible.",
+      "same_region": false,
+      "capacity_sufficient": true,
+      "meets_deadline": false
+    },
+    {
+      "vendor": {
+        "vendor_id": "vendor-a",
+        "vendor_name": "Vendor A",
+        "lead_time_days": 3.0,
+        "total_cost": 120000.0,
+        "currency": "USD",
+        "risk_score": 78,
+        "capacity": 10000,
+        "expedite_cost": 0.0,
+        "freight_cost": 0.0,
+        "region": "East Java",
+        "distance_km": 650.0
+      },
+      "feasible": true,
+      "action_cost": 120000.0,
+      "residual_stockout_days": 0.25,
+      "residual_stockout_loss": 19500.0,
+      "risk_adjusted_total": 139500.0,
+      "rationale": "Vendor A: $120,000 landed action cost plus $19,500 risk-adjusted residual loss (0.25 reserve-adjusted stockout days); 650 km from the plant in East Java; cross-region sourcing; capacity sufficient; meets coverage deadline; feasible.",
+      "same_region": false,
+      "capacity_sufficient": true,
+      "meets_deadline": true
+    },
+    {
+      "vendor": {
+        "vendor_id": "vendor-d",
+        "vendor_name": "Vendor D",
+        "lead_time_days": 5.0,
+        "total_cost": 100000.0,
+        "currency": "USD",
+        "risk_score": 60,
+        "capacity": 15000,
+        "expedite_cost": 0.0,
+        "freight_cost": 0.0,
+        "region": "West Java",
+        "distance_km": 300.0
+      },
+      "feasible": false,
+      "action_cost": 100000.0,
+      "residual_stockout_days": 2.25,
+      "residual_stockout_loss": 135000.0,
+      "risk_adjusted_total": 235000.0,
+      "rationale": "Vendor D: $100,000 landed action cost plus $135,000 risk-adjusted residual loss (2.25 reserve-adjusted stockout days); 300 km from the plant in West Java; same-region sourcing; capacity sufficient; misses coverage deadline; not feasible.",
+      "same_region": true,
+      "capacity_sufficient": true,
+      "meets_deadline": false
+    }
+  ],
+  "selected_vendor_id": "vendor-b",
+  "chain_of_thought": [
+    "Classified as weather. The disruption delay is 5 days and available stock covers 3 days. The resulting high classification is significant and requires mitigation. Matched 1 shipments and 1 open purchase orders in SAP.",
+    "Evaluated 1 BOM components using stock coverage and deterministic line-stoppage cost. Coverage is current stock (3,000) divided by daily consumption (1,000) = 3 days. A 5-day delay leaves 2 stockout days, with estimated inaction loss of $200,000 at $100,000 per day.",
+    "Compared 4 Ariba supplier quotes against the 5,000-unit requirement, delivery window, risk-adjusted stockout exposure, and total landed cost.",
+    "[SAP S/4HANA] Cost of inaction was computed from stock coverage and production-loss inputs by deterministic Python logic.",
+    "[SAP Ariba] Python evaluated 3 feasible supplier offers.",
+    "[Amazon Bedrock] Mock provider generated a deterministic explanation offline.",
+    "Vendor B is recommended: its 2-day lead time has a $135,000 risk-adjusted response cost against $200,000 cost of inaction. Its risk-adjusted total is $135,000. The best other feasible option is Vendor A at $139,500 risk-adjusted. A human must approve the draft before any SAP purchase-order execution."
+  ],
+  "trace_steps": [
+    {
+      "source": "SAP S/4HANA",
+      "text": "Cost of inaction was computed from stock coverage and production-loss inputs by deterministic Python logic."
+    },
+    {
+      "source": "SAP Ariba",
+      "text": "Python evaluated 3 feasible supplier offers."
+    },
+    {
+      "source": "Amazon Bedrock",
+      "text": "Mock provider generated a deterministic explanation offline."
+    }
+  ],
+  "draft_po": {
+    "po_id": "e86b0b97-cc65-4b33-90ac-8c2b6d26ec77",
+    "sap_reference": null,
+    "vendor_id": "vendor-b",
+    "vendor_name": "Vendor B",
+    "component_id": "microchip-x",
+    "component_name": "Microchip X",
+    "quantity": 5000,
+    "unit_price": 27.0,
+    "total_price": 135000.0,
+    "currency": "USD",
+    "terms": "Air Freight",
+    "expected_date": "2026-10-27",
+    "status": "PENDING_APPROVAL"
+  },
+  "cost_of_inaction": 200000.0,
+  "execution_tracking": null,
+  "kpis": null,
+  "inventory_snapshot": {
+    "component_id": "microchip-x",
+    "component_name": "Microchip X",
+    "current_stock": 3000,
+    "daily_consumption": 1000,
+    "line_stoppage_cost_per_day": 100000.0,
+    "purchase_quantity": 5000,
+    "currency": "USD",
+    "purchase_terms": "Air Freight",
+    "plant_region": "West Java"
+  },
+  "material_impacts": [
+    {
+      "component_id": "microchip-x",
+      "component_name": "Microchip X",
+      "coverage_days": 3.0,
+      "stockout_days": 2.0,
+      "cost_of_inaction": 200000.0,
+      "critical": true
+    }
+  ],
+  "approval_overdue_notified": false,
+  "workflow_task_id": "mock-workflow-ca713bce-6b6a-43ec-bb24-735324305e30",
+  "last_decision": null,
+  "audit_log": [
+    {
+      "timestamp": "2026-10-25T05:23:33.384476Z",
+      "agent": "event_ingestion",
+      "input_summary": "source=port-weather-monitor; event_id=ce96cef4-6fd1-4456-b32f-c5c14e0515c6",
+      "output_summary": "External disruption accepted for analysis.",
+      "reasoning": "The event was stored before the sequential agent workflow started.",
+      "proposal_step": 1
+    },
+    {
+      "timestamp": "2026-10-25T05:23:33.385946Z",
+      "agent": "sap_s4hana",
+      "input_summary": "Inventory requested for microchip-x.",
+      "output_summary": "3,000 units; 1,000 units consumed per day.",
+      "reasoning": "Retrieved the stock-of-record snapshot used for this analysis.",
+      "proposal_step": 2
+    },
+    {
+      "timestamp": "2026-10-25T05:23:33.386706Z",
+      "agent": "monitoring",
+      "input_summary": "{\"event_id\":\"ce96cef4-6fd1-4456-b32f-c5c14e0515c6\",\"tenant_id\":\"demo\",\"title\":\"Extreme weather delays cargo ship\",\"description\":\"Severe weather has delayed the vessel carrying Microchip X by five days.\",\"component_id\":\"microchip-x\",\"component_name\":\"Microchip X\",\"delay_days\":5.0,\"event_type\":null,\"idempotency_key\":null,\"affected_component_ids\":[],\"language\":\"id\",\"source\":\"port-weather-monitor\",\"occurred_at\":\"2026-10-25T05:23:33.352655Z\"}",
+      "output_summary": "High severity; 5-day delay versus 3 days of stock coverage.",
+      "reasoning": "Classified as weather. The disruption delay is 5 days and available stock covers 3 days. The resulting high classification is significant and requires mitigation. Matched 1 shipments and 1 open purchase orders in SAP.",
+      "proposal_step": 2
+    },
+    {
+      "timestamp": "2026-10-25T05:23:33.387799Z",
+      "agent": "logistics",
+      "input_summary": "delay=5; inventory={\"component_id\":\"microchip-x\",\"component_name\":\"Microchip X\",\"current_stock\":3000,\"daily_consumption\":1000,\"line_stoppage_cost_per_day\":100000.0,\"purchase_quantity\":5000,\"currency\":\"USD\",\"purchase_terms\":\"Air Freight\",\"plant_region\":\"West Java\"}",
+      "output_summary": "Evaluated 1 affected materials; Microchip X is most critical. 3,000 units cover 3 days; estimated stockout is 2 days ($200,000).",
+      "reasoning": "Evaluated 1 BOM components using stock coverage and deterministic line-stoppage cost. Coverage is current stock (3,000) divided by daily consumption (1,000) = 3 days. A 5-day delay leaves 2 stockout days, with estimated inaction loss of $200,000 at $100,000 per day.",
+      "proposal_step": 3
+    },
+    {
+      "timestamp": "2026-10-25T05:23:33.388966Z",
+      "agent": "procurement",
+      "input_summary": "component=microchip-x; quantity=5000",
+      "output_summary": "Compared 4 vendors; 3 are feasible.",
+      "reasoning": "Compared 4 Ariba supplier quotes against the 5,000-unit requirement, delivery window, risk-adjusted stockout exposure, and total landed cost.",
+      "proposal_step": 4
+    },
+    {
+      "timestamp": "2026-10-25T05:23:33.391393Z",
+      "agent": "orchestrator",
+      "input_summary": "inaction_cost=200000.00; vendors=4",
+      "output_summary": "Selected Vendor B at $135,000 risk-adjusted total.",
+      "reasoning": "Vendor B is recommended: its 2-day lead time has a $135,000 risk-adjusted response cost against $200,000 cost of inaction. Its risk-adjusted total is $135,000. The best other feasible option is Vendor A at $139,500 risk-adjusted. A human must approve the draft before any SAP purchase-order execution.",
+      "proposal_step": 5
+    },
+    {
+      "timestamp": "2026-10-25T05:23:33.391424Z",
+      "agent": "sap_s4hana",
+      "input_summary": "Selected Vendor B at $135,000 risk-adjusted total.",
+      "output_summary": "Draft PO e86b0b97-cc65-4b33-90ac-8c2b6d26ec77 created; not executed.",
+      "reasoning": "A draft is stored for human review; no financial transaction was executed.",
+      "proposal_step": 6
+    },
+    {
+      "timestamp": "2026-10-25T05:23:33.391444Z",
+      "agent": "sap_business_workflow",
+      "input_summary": "run_id=ca713bce-6b6a-43ec-bb24-735324305e30; po_id=e86b0b97-cc65-4b33-90ac-8c2b6d26ec77",
+      "output_summary": "Approval task mock-workflow-ca713bce-6b6a-43ec-bb24-735324305e30 created.",
+      "reasoning": "The draft is linked to a human approval task; it remains unexecuted.",
+      "proposal_step": 6
+    },
+    {
+      "timestamp": "2026-10-25T05:23:33.393582Z",
+      "agent": "notifications",
+      "input_summary": "run_id=ca713bce-6b6a-43ec-bb24-735324305e30; event=draft_ready",
+      "output_summary": "Notification delivered to 1 channel(s).",
+      "reasoning": "Bahan baku Microchip X terlambat 5 hari. Stok cukup untuk 3 hari (sumber: SAP S/4HANA). Rekomendasi: beli dari Vendor B seharga $135,000 (sumber: SAP Ariba).\nRingkasan keputusan: Vendor B direkomendasikan; biaya tanpa tindakan $200,000. Draf PO menunggu persetujuan manusia.\nSetujui (membuka tinjauan eksplisit; tidak langsung mengeksekusi): [signed approval link]\nLihat detail: [signed view link]",
+      "proposal_step": 7
+    }
+  ],
+  "error": null,
+  "revision_note": null,
+  "created_at": "2026-10-25T05:23:33.384429Z",
+  "updated_at": "2026-10-25T05:23:33.391529Z"
+}

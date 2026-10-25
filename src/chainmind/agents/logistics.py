@@ -1,6 +1,11 @@
 """Logistics agent for stock coverage and production-loss estimates."""
 
-from chainmind.core.models import DisruptionEvent, InventorySnapshot, LogisticsResult
+from chainmind.core.models import (
+    DisruptionEvent,
+    InventorySnapshot,
+    LogisticsResult,
+    MaterialImpact,
+)
 
 
 def calculate_coverage_days(current_stock: int, daily_consumption: int) -> float:
@@ -44,3 +49,48 @@ class LogisticsAgent:
             stockout_days=stockout_days,
             cost_of_inaction=cost_of_inaction,
         )
+
+    def analyze_components(
+        self,
+        event: DisruptionEvent,
+        inventories: list[InventorySnapshot],
+    ) -> tuple[LogisticsResult, list[MaterialImpact]]:
+        """Evaluate affected BOM materials and return the highest-loss component."""
+
+        if not inventories:
+            raise ValueError("At least one affected inventory snapshot is required.")
+        results = [self.analyze(event, inventory) for inventory in inventories]
+        critical_index = max(
+            range(len(results)),
+            key=lambda index: (
+                results[index].cost_of_inaction,
+                results[index].stockout_days,
+                results[index].inventory.component_id,
+            ),
+        )
+        impacts = [
+            MaterialImpact(
+                component_id=result.inventory.component_id,
+                component_name=result.inventory.component_name,
+                coverage_days=result.coverage_days,
+                stockout_days=result.stockout_days,
+                cost_of_inaction=result.cost_of_inaction,
+                critical=index == critical_index,
+            )
+            for index, result in enumerate(results)
+        ]
+        critical = results[critical_index].model_copy(
+            update={
+                "summary": (
+                    f"Evaluated {len(impacts)} affected materials; "
+                    f"{impacts[critical_index].component_name} is most critical. "
+                    f"{results[critical_index].summary}"
+                ),
+                "reasoning": (
+                    f"Evaluated {len(impacts)} BOM components using stock coverage and "
+                    "deterministic line-stoppage cost. "
+                    f"{results[critical_index].reasoning}"
+                ),
+            }
+        )
+        return critical, impacts

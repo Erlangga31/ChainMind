@@ -7,13 +7,18 @@ __pycache__/
 !.env.example
 node_modules/
 dashboard/dist/
+dashboard/test-results/
+dashboard/playwright-report/
 dist/
 build/
 *.egg-info/
 cdk.out/
 infra/cdk.out/
+infra/.lambda-package/
 .DS_Store
 *.log
+*.sqlite3
+data/notifications.jsonl
 .vscode/*
 !.vscode/settings.json
 *.py[cod]
@@ -22,3 +27,4 @@ coverage.xml
 .vite/
 cdk.context.json
 *.tsbuildinfo
+docs/reference/

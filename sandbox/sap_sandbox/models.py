@@ -17,6 +17,10 @@ class MaterialStock(SandboxModel):
     """Material stock and consumption fields exposed as OData properties."""
 
     Material: str
+    Plant: str = "1000"
+    StorageLocation: str = "0001"
+    MatlWrhsStkQtyInMatBaseUnit: int = Field(ge=0)
+    MaterialBaseUnit: str = "EA"
     MaterialName: str
     UnrestrictedStock: int = Field(ge=0)
     DailyConsumption: int = Field(gt=0)
@@ -54,3 +58,9 @@ class WorkflowDecisionRequest(SandboxModel):
 
     decision: Literal["approve", "reject"]
     note: str = Field(default="", max_length=1_000)
+
+
+class WorkflowDraftUpdate(SandboxModel):
+    """Replace the PO associated with an existing pending task."""
+
+    po_id: str = Field(min_length=1, max_length=100)
