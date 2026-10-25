@@ -31,6 +31,8 @@ AWS LocalStack/CDK synthesis, not production services.
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![CI](https://github.com/Erlangga31/ChainMind/actions/workflows/ci.yml/badge.svg)](https://github.com/Erlangga31/ChainMind/actions/workflows/ci.yml)
 
+**Status proyek dan langkah yang tersisa:** [docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md)
+
 ## Ikhtisar
 
 Rantai pasok manufaktur memerlukan lebih dari sekadar alarm ketika pengiriman terlambat: tim operasi perlu memahami dampak stok, mengevaluasi alternatif vendor, dan menyiapkan tindakan yang bisa ditinjau dengan cepat. ChainMind adalah fondasi demo agentic AI untuk alur tersebut.

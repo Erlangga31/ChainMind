@@ -53,6 +53,12 @@ Lihat [DEMO.md](./DEMO.md) untuk naskah lengkap dan fallback bila sandbox lokal 
 - Sebelum pilot: tinjau keamanan, residency, tenancy, recovery, biaya, human approval policy,
   contract/API SAP, dan uji staging berizin.
 
+## Status rilis dan langkah operator
+
+PR final #17 telah merged ke `main`; keenam job CI pada merge commit sukses. Rincian tahap yang
+selesai, hash commit/tag, hitungan tes, antrean maintenance Dependabot, dan checklist rehearsal
+yang masih harus dilakukan operator ada di [PROJECT_STATUS.md](./PROJECT_STATUS.md).
+
 ## Klaim yang boleh dipakai
 
 > “SAP sandbox simulating S/4HANA OData and Ariba; AWS verified with LocalStack and cdk synth.”
