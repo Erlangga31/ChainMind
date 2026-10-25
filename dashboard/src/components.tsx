@@ -254,7 +254,7 @@ export function AuditViewer({
       <ol className="mt-4 space-y-3">
         {run.audit_log.map((entry, index) => (
           <li key={`${entry.timestamp}-${index}`} className="border-l-2 border-teal-500 pl-4">
-            <p className="text-xs text-slate-500">{new Date(entry.timestamp).toLocaleString()} · {entry.agent}</p>
+            <p className="text-xs text-slate-500">{entry.proposal_step ? `Step ${entry.proposal_step} · ` : ""}{new Date(entry.timestamp).toLocaleString()} · {entry.agent}</p>
             <p className="mt-1 text-sm font-semibold text-ink">{entry.output_summary}</p>
             <p className="mt-1 text-sm text-slate-600">{entry.reasoning}</p>
           </li>

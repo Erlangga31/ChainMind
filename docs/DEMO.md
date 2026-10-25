@@ -15,6 +15,8 @@ Durasi yang disarankan: **5 menit**. Demo berjalan offline dengan adapter mock; 
 
 1. Jalankan `uv sync --extra dev` dan `cd dashboard; npm ci`.
 2. Dari root, jalankan `.\scripts\run_all.ps1` (Windows) atau `uv run python scripts/run_all.py`.
+   Launcher menjalankan `scripts/preflight.py` lebih dulu untuk memeriksa port, versi Python/Node,
+   dependensi lokal, fixture, dan akun demo OIDC; semua pemeriksaan bersifat lokal.
 3. Tunggu pesan siap, lalu buka `http://127.0.0.1:5173`. API, sandbox SAP/OIDC, dan Vite berjalan lokal dalam mock mode; tidak membutuhkan AWS/SAP atau akses internet saat demo.
 4. Masuk sebagai `approver` dengan password `demo`. Bahasa awal dashboard Indonesia; kontrol `EN`
    mengganti dashboard ke Inggris. Ini fake OIDC sandbox, bukan login ke SAP IAS/Cognito produksi.
@@ -49,3 +51,22 @@ Launcher memakai localhost dan adapter mock; ia tidak memerlukan layanan cloud. 
 - Draf Vendor B = `5.000 × $27 = $135.000`, `PENDING_APPROVAL`.
 
 Angka adalah hasil dataset demo dan asumsi mock, bukan penawaran SAP Ariba atau rekomendasi pengadaan yang tervalidasi produksi.
+
+## Mode presenter dan replay
+
+- Untuk presenter, buka `http://127.0.0.1:5173/?presenter=1` sebelum login approver. Setelah login,
+  ChainMind otomatis memicu fixture cuaca dan membuka Flow. Tombol **Lanjut / Next** menggerakkan
+  narasi enam bagian yang mengikuti urutan naskah ini; mode ini menyembunyikan menu administrasi.
+- Jalankan `uv run python scripts/generate_replay_fixture.py` untuk membangun ulang
+  `dashboard/public/replay-run.json` dari pipeline mock kanonis. Jangan menyunting hasil JSON secara
+  manual; gunakan ulang skrip dan uji `tests/test_replay_fixture.py`.
+- Jika API tidak terjangkau sementara dashboard dan sandbox OIDC masih hidup, login lalu pilih
+  **Muat replay rekaman / Load recorded replay** pada banner error. UI memberi penanda **REPLAY**,
+  menampilkan jalur stage bertahap, dan menonaktifkan trigger/approval karena fixture hanya-baca.
+- Periksa prasyarat dengan `uv run python scripts/preflight.py`; untuk validasi konfigurasi offline,
+  gunakan `uv run python scripts/validate_config.py --mode mock`.
+
+## Naskah presenter tiga menit
+
+Naskah bertimestamp dan tindakan layar yang tepat tersedia di
+[VIDEO_SCRIPT.md](./VIDEO_SCRIPT.md). Semua angka di halaman KPI dan fixture bersifat simulasi/ilustratif.

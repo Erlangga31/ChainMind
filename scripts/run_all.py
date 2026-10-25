@@ -155,6 +155,14 @@ def _stop(processes: list[subprocess.Popen[bytes]]) -> None:
 def main() -> int:
     """Start processes, wait for health, and stop all child processes on exit."""
 
+    if os.environ.get("CHAINMIND_PREFLIGHT_DONE") != "1":
+        preflight = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "preflight.py")],
+            cwd=ROOT,
+            check=False,
+        )
+        if preflight.returncode != 0:
+            return preflight.returncode
     services = service_definitions()
     processes: list[subprocess.Popen[bytes]] = []
     environment = os.environ.copy()

@@ -27,7 +27,7 @@ Bedrock, Cognito/IAS, Teams/Slack/SES, SAP, atau SAP BTP telah diverifikasi seca
 | 5 — solusi agentic AI empat agen | Implemented (mock) | [Agents](../src/chainmind/agents/), [pipeline](../src/chainmind/workflow/pipeline.py), action groups pada [CDK stack](../infra/chainmind_stack.py). | unit-tested, synth-only; tidak ada Bedrock runtime. |
 | 6 — arsitektur AWS/SAP | Partial | CDK memodelkan Lambda, EventBridge, Step Functions, API Gateway, S3, CloudWatch, IAM/KMS, VPC, Cognito, dan Bedrock; SAP adapters/sandbox tersedia. | unit-tested, sandbox-verified, synth-only; SAP BTP production dan AWS deployment **needs real AWS or SAP**. |
 | 7 — alur end-to-end 8 langkah | Partial | Pemetaan lengkap per langkah di bawah; local pipeline menguji alur mock dari event hingga tracking. | unit-tested dan sandbox-verified; Step Functions/AWS-to-SAP runtime **needs real AWS or SAP**. |
-| 7.1 — diagram end-to-end dan stages 0–6 | Implemented (demo mapping) | Stage 0–6 dijabarkan di tabel alur berikutnya; enam label dashboard dan CLI berada di [components](../dashboard/src/components.tsx) dan [run_demo.py](../scripts/run_demo.py). | unit-tested, Playwright E2E; service wiring real **needs real AWS or SAP**. |
+| 7.1 — diagram end-to-end dan stages 0–6 | Implemented (live mock run) | [FlowDiagram](../dashboard/src/FlowDiagram.tsx) menampilkan event ingest, stage 0–6, dua decision diamonds, cabang tidak signifikan/tolak/revisi, nilai vendor/PO, dan service footer. Stage status berasal dari `/runs/{run_id}`. | unit-tested, Playwright E2E/axe, screenshot ID/EN; service wiring real **needs real AWS or SAP**. |
 | 8 — UX dan human-in-the-loop | Partial | [Dashboard](../dashboard/src/App.tsx), feed dengan sumber SAP, fake OIDC roles, signed links, modal konfirmasi, approve/reject/revise. | unit-tested dan Playwright E2E; omnichannel live dan SAP Business Workflow **needs real AWS or SAP**. |
 | 9 — keamanan, privasi, kepatuhan | Partial | JWT verification, RBAC, KMS, private endpoints, encrypted/versioned S3, CloudTrail, audit, cdk-nag, API throttling. | Unit-tested dan synth-only; IAM review, VPC flow logs/WAF, account controls, privacy/compliance certification **needs real AWS or SAP**. |
 | 10 — competitive position | Partial | Klaim dan pembeda dirangkum sebagai proposisi dalam [pitch](./PITCH.md); tidak ada benchmark produk pesaing. | Documentation-only; validasi pasar dan klaim kompetitif belum dilakukan. |
@@ -39,6 +39,10 @@ Bedrock, Cognito/IAS, Teams/Slack/SES, SAP, atau SAP BTP telah diverifikasi seca
 | Indonesian/English experience and accessible layout | Implemented | [translations](../dashboard/src/i18n.ts), localized notifications/demo labels, accessibility controls and [Playwright axe/responsive test](../dashboard/e2e/auth-workflow.spec.ts). | unit-tested, Playwright; critical/serious axe violations blocked, 375px and 1280px viewports exercised. |
 | Model-agnostic Bedrock configuration | Implemented (configuration surface) | `CHAINMIND_BEDROCK_MODEL_ID`, `BedrockLLMClient`, and deterministic Bedrock Agents fallback metadata. | unit-tested configuration; model permissions/invocation **needs real AWS**. |
 | Release and budget readiness | Implemented (scaffold) | [Version/changelog](../CHANGELOG.md), [tag guidance](../CONTRIBUTING.md), [jury evidence](./JURY_PACK.md), CDK budget threshold and project tags. | CDK assertions, synth-only; cost-allocation tag activation, SNS email confirmation, and real account spend monitoring **needs real AWS**. |
+| 23 — Figure 1 live flow | Implemented (mock) | [Flow page](../dashboard/src/FlowDiagram.tsx), [component/branch tests](../dashboard/src/FlowDiagram.test.tsx), [E2E](../dashboard/e2e/auth-workflow.spec.ts), [flow screenshots](./screenshots/). | Vitest, Playwright and axe on ID/EN; current data comes from the selected run; no live service validation. |
+| 24 — presenter and replay | Implemented (offline demo tooling) | `?presenter=1`, [replay generator](../scripts/generate_replay_fixture.py), [replay fixture](../dashboard/public/replay-run.json), [preflight](../scripts/preflight.py), [3-minute video](./VIDEO_SCRIPT.md). | E2E and generator/preflight unit tests; replay is recorded mock data and read-only. |
+| 25 — proposal fidelity and stage 6 outputs | Implemented (locally checkable claims) | [fidelity tests](../tests/test_proposal_fidelity.py), [numbered audit steps](../src/chainmind/core/models.py), [tracking outputs](../src/chainmind/agents/tracking.py), `/kpis`. | Pipeline/API tests and mocked S3 archive assertions; only LocalStack/synth for AWS, sandbox for SAP. |
+| 26 — real-account readiness | Implemented (documentation/validation) | [GO_LIVE.md](./GO_LIVE.md), [offline config validator](../scripts/validate_config.py), [AWS verifier](../scripts/verify_aws_account.py), [SAP verifier](../scripts/verify_sap_tenant.py). | Validator unit-tested; live checks are opt-in and were not run. |
 | 13 — roadmap MVP enam minggu | Partial | Sandbox, API, agents, UI, notifikasi, demo dan testing dijabarkan di [DEMO.md](./DEMO.md). | Implementasi mock lokal terverifikasi; pilot BTP dan runtime layanan nyata belum dikerjakan. |
 | 15 — risiko dan mitigasi | Partial | Risiko salah pilih agen, adopsi, kompleksitas SAP, ketergantungan Bedrock, dan perubahan API dicatat di [BUSINESS.md](./BUSINESS.md). | Documentation-only, cdk-nag synth-only; bukan threat model atau security certification formal. |
 | 16 — pendanaan/sumber daya | Partial | Kategori biaya AWS/SAP, kapasitas tim, dan user validation placeholders tersedia di [BUSINESS.md](./BUSINESS.md). | Tidak ada harga, budget, atau estimasi aktual; semua masih TBD. |
@@ -72,14 +76,14 @@ Bedrock, Cognito/IAS, Teams/Slack/SES, SAP, atau SAP BTP telah diverifikasi seca
 
 | # | Proposal flow | Implementasi | Status / verifikasi |
 | --- | --- | --- | --- |
-| 1 | SAP Event Mesh atau sinyal eksternal cuaca/logistik masuk | Simulated Event Mesh publish/webhook dan event ingestion API | sandbox-verified; external data provider/BTP **needs real SAP**. |
+| 1 | SAP Event Mesh atau sinyal eksternal cuaca/logistik masuk | Simulated Event Mesh publish/webhook, `event_ingestion` audit record (`proposal_step=1`) dan API | unit-tested, sandbox-verified; external data provider/BTP **needs real SAP**. |
 | 2 | EventBridge → Lambda → Monitoring Bedrock Agent | CDK bus/rules, Lambda handler dan Bedrock Agent scaffold; local pipeline terpicu API | unit-tested, synth-only; cloud trigger **needs real AWS**. |
 | 3 | Monitoring Action Group membaca S/4HANA OData via Integration Suite | Mock S/4HANA client, OData sandbox, Action Group; Integration Suite tercatat prerequisite | unit-tested, sandbox-verified; **needs real SAP**. |
 | 4 | Procurement memanggil Ariba Network API untuk alternatif vendor | Ariba mock memberi lead time, harga, kapasitas, risiko; minimal dua vendor dibandingkan | unit-tested, sandbox-verified; **needs real SAP**. |
 | 5 | Step Functions orkestrasi, observability, retry API | CDK state machine dengan approval callback, retry/catch, X-Ray, DLQ | unit-tested, synth-only; **needs real AWS**. |
 | 6 | Lambda menulis draf PO ke S/4HANA dan memulai Business Workflow | Mock draft `PENDING_APPROVAL`, SAP workflow simulator dan role-gated decision API | unit-tested, sandbox-verified; **needs real SAP**. |
 | 7 | API Gateway menyajikan notifikasi Teams/Slack/email | Adaptive Card/Block Kit melalui fake HTTP server, SES Stubber, signed link route dan UI feed | unit-tested, synth-only; kanal nyata **needs real AWS or SAP**. |
-| 8 | Approval memperbarui SAP; audit disimpan di CloudWatch Logs/S3 | Human confirmation, mock SAP execution, audit trail; CDK CloudWatch/S3 archive | unit-tested, sandbox-verified, synth-only; **needs real AWS or SAP**. |
+| 8 | Approval memperbarui SAP; audit disimpan di CloudWatch Logs/S3 | Human approval and execution audits use `proposal_step=8`; S3 archive stores trace/audit. | unit-tested, mocked S3 archive, LocalStack in CI and synth-only; **needs real AWS or SAP**. |
 
 ## End-to-end figure — Stage 0 sampai Stage 6
 
@@ -91,18 +95,18 @@ Bedrock, Cognito/IAS, Teams/Slack/SES, SAP, atau SAP BTP telah diverifikasi seca
 | 3 | Pencarian Solusi | Vendor comparison dan feasibility economics | unit-tested, sandbox-verified |
 | 4 | Analisis & Keputusan | Orchestrator memilih rekomendasi; model hanya menulis rationale | unit-tested, synth-only |
 | 5 | Human-in-the-Loop | Viewer/approver authorization, explicit confirmation, revise/reject | unit-tested, sandbox-verified, Playwright |
-| 6 | Eksekusi Purchase Order | Mock SAP PO execution, confirmation, tracking dan KPI | unit-tested, sandbox-verified; SAP live belum diverifikasi |
+| 6 | Eksekusi Purchase Order / Monitoring & Tracking | Mock SAP PO execution, supplier confirmation, shipment monitoring, ETA update, inventory projection, deviation alert, KPI outcome. | unit-tested, sandbox-verified; SAP live belum diverifikasi |
 
 ## Validasi dan batas deployment
 
-Validasi lokal terbaru: backend pytest **141 passed, 9 skipped** (LocalStack/live SAP opt-in tidak
-dijalankan lokal); dashboard Vitest **12 passed**; Playwright **7 passed**, termasuk axe check dan
-viewport 375px / 1280px; browser-test typecheck dan production build lulus; Ruff lint/format lulus;
-CDK assertions **13 passed**; `cdk synth` lulus. `npm audit --audit-level=moderate` tidak menemukan
-kerentanan. `pip-audit` tidak menemukan advisories pada dependency yang dikenal; package lokal
-`chainmind` ditandai skip karena belum dipublikasikan ke PyPI. Secret scan repository tidak
-menemukan pola kredensial; PDF proposal tetap di-ignore dan tidak tracked. Docker CLI/Engine tidak
-tersedia, jadi `docker compose config` tidak dijalankan. CI commit release harus diperiksa di GitHub.
+Validasi lokal final pada branch ini: backend pytest **154 passed, 9 skipped** (tes opt-in seperti
+LocalStack/live SAP tidak dijalankan lokal); dashboard Vitest **15 passed**; Playwright **10 passed**,
+termasuk flow ID/EN, axe, presenter, offline replay dan viewport 375px / 1280px; browser-test
+typecheck dan production build lulus; Ruff lint/format lulus. CDK app synthesis lulus via
+`python infra/app.py`; perintah CLI `cdk` tidak tersedia di PATH. CDK assertions **13 passed** pada
+validasi sebelumnya, tidak diulang pada pass ini. Dependency audit, secret scan, dan pemeriksaan
+Docker yang tercatat sebelumnya bukan bagian dari pass final ini. CI commit release harus diperiksa
+di GitHub.
 
 CDK synth menargetkan Python 3.12 Linux x86_64 dan memaketkan dependencies. Synthesis tidak
 membuktikan asset dijalankan Lambda. Suppressions cdk-nag yang ada memiliki alasan tertulis; review

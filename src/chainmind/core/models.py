@@ -213,6 +213,7 @@ class AuditEntry(DomainModel):
     input_summary: str
     output_summary: str
     reasoning: str
+    proposal_step: int | None = Field(default=None, ge=1, le=8)
 
 
 class StageResult(DomainModel):
@@ -238,6 +239,7 @@ class PurchaseOrder(DomainModel):
     total_price: float = Field(gt=0)
     currency: str = "USD"
     terms: str = "Air Freight"
+    expected_date: date | None = None
     status: str = "PENDING_APPROVAL"
 
 
@@ -271,6 +273,14 @@ class InventoryProjection(DomainModel):
     source: str = "ChainMind simulation"
 
 
+class TrackingMonitoringOutput(DomainModel):
+    """One explicit stage-6 monitoring signal surfaced through the API."""
+
+    kind: Literal["shipment", "eta", "inventory", "deviation", "kpi"]
+    status: str
+    summary: str
+
+
 class ExecutionTracking(DomainModel):
     """Post-approval execution, supplier, shipment, and projection result."""
 
@@ -282,6 +292,7 @@ class ExecutionTracking(DomainModel):
     line_stoppage_avoided: bool
     eta_deviation_days: float = Field(ge=0)
     alert: str | None = None
+    monitoring_outputs: list[TrackingMonitoringOutput] = Field(default_factory=list)
     simulated: bool = True
 
 

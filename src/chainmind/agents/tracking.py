@@ -9,6 +9,7 @@ from chainmind.core.models import (
     PurchaseOrder,
     RunKPI,
     ShipmentTracking,
+    TrackingMonitoringOutput,
     Vendor,
     VendorConfirmation,
 )
@@ -72,6 +73,37 @@ class TrackingAgent:
             line_stoppage_avoided=line_stoppage_avoided,
             eta_deviation_days=eta_deviation,
             alert=alert,
+            monitoring_outputs=[
+                TrackingMonitoringOutput(
+                    kind="shipment",
+                    status="MONITORING",
+                    summary=f"Shipment {shipment.tracking_id} status: {shipment.status}.",
+                ),
+                TrackingMonitoringOutput(
+                    kind="eta",
+                    status="UPDATED",
+                    summary=f"ETA updated to {shipment.estimated_arrival.isoformat()}.",
+                ),
+                TrackingMonitoringOutput(
+                    kind="inventory",
+                    status="PROJECTED",
+                    summary=f"Projected inventory at arrival: {projected_stock} units.",
+                ),
+                TrackingMonitoringOutput(
+                    kind="deviation",
+                    status="ALERT" if alert else "CLEAR",
+                    summary=alert or "No ETA deviation from the supplier quote.",
+                ),
+                TrackingMonitoringOutput(
+                    kind="kpi",
+                    status="ACHIEVED" if line_stoppage_avoided else "NOT_ACHIEVED",
+                    summary=(
+                        "Line-stoppage avoidance target achieved."
+                        if line_stoppage_avoided
+                        else "Line-stoppage avoidance target not achieved."
+                    ),
+                ),
+            ],
             simulated=simulated,
         )
         action_cost = order.total_price

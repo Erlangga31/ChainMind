@@ -13,6 +13,15 @@ if (Test-Path $VenvPython) {
 Push-Location $ProjectRoot
 try {
     if ($Python -eq "py") {
+        & $Python -3.12 scripts\preflight.py
+    } else {
+        & $Python scripts\preflight.py
+    }
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+    $env:CHAINMIND_PREFLIGHT_DONE = "1"
+    if ($Python -eq "py") {
         & $Python -3.12 scripts\run_all.py
     } else {
         & $Python scripts\run_all.py

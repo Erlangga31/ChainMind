@@ -132,7 +132,13 @@ npm ci
 npm run dev
 ```
 
-Buka `http://localhost:5173`, klik **Sign in with ChainMind SSO**, lalu masuk sebagai `viewer` atau `approver` (password `demo`). Pilih skenario, lalu klik **Trigger demo disruption**. Dashboard menampilkan linimasa enam tahap, dampak stok, tabel serta grafik vendor, trace per sumber, audit log, feed notifikasi dengan sumber SAP, draf PO dengan dialog konfirmasi, tracking dan halaman KPI ilustratif. Viewer tetap read-only; hanya bearer token terverifikasi dengan role approver yang dapat mengirim keputusan. Tombol **Approve** pada feed hanya membuka dialog konfirmasi dan tidak mengeksekusi PO secara langsung.
+Buka `http://localhost:5173`, klik **Sign in with ChainMind SSO**, lalu masuk sebagai `viewer` atau `approver` (password `demo`). Pilih skenario, lalu klik **Trigger demo disruption**. Dashboard menampilkan linimasa enam tahap, halaman **Flow/Alur** yang menyorot diagram proposal dari stage aktual, dampak stok, tabel serta grafik vendor, trace per sumber, audit log bernomor sesuai langkah proposal, feed notifikasi dengan sumber SAP, draf PO dengan dialog konfirmasi, tracking outputs, dan halaman KPI ilustratif. Viewer tetap read-only; hanya bearer token terverifikasi dengan role approver yang dapat mengirim keputusan. Tombol **Approve** pada feed hanya membuka dialog konfirmasi dan tidak mengeksekusi PO secara langsung.
+Gunakan `http://127.0.0.1:5173/?presenter=1` untuk mode presenter: setelah login, skenario cuaca
+otomatis dijalankan dan tombol **Lanjut / Next** menggerakkan narasi. Jika API tidak tersedia,
+opsi replay hanya-baca dapat memuat fixture hasil mock pipeline; badge **REPLAY** membedakannya dari
+run langsung. `.\scripts\run_all.ps1` menjalankan preflight lokal sebelum menyalakan sandbox, API,
+dan Vite. Panduan video dan kesiapan akun nyata ada di [VIDEO_SCRIPT.md](./docs/VIDEO_SCRIPT.md)
+dan [GO_LIVE.md](./docs/GO_LIVE.md).
 Gunakan kontrol **ID/EN** untuk mengganti bahasa; dashboard, notifikasi, dan `run_demo.py`
 mendukung bahasa Indonesia dan Inggris. Tampilan kontras tinggi dan teks besar dapat diaktifkan dari
 kontrol aksesibilitas. Tabel vendor menampilkan wilayah/jarak dan dampak BOM menandai komponen
@@ -149,6 +155,7 @@ Cuplikan alur demo lain:
 ![Feed notifikasi](./docs/screenshots/notification-feed.png)
 ![Draf PO menunggu approval](./docs/screenshots/po-approval.png)
 ![KPI ilustratif](./docs/screenshots/kpis.png)
+![Live proposal flow in English](./docs/screenshots/flow-en.png)
 
 Cuplikan dashboard berbahasa Indonesia:
 
@@ -159,6 +166,7 @@ Cuplikan dashboard berbahasa Indonesia:
 ![Feed notifikasi berbahasa Indonesia](./docs/screenshots/notification-feed-id.png)
 ![Draf PO berbahasa Indonesia](./docs/screenshots/po-approval-id.png)
 ![Halaman KPI berbahasa Indonesia](./docs/screenshots/kpis-id.png)
+![Alur proposal langsung berbahasa Indonesia](./docs/screenshots/flow-id.png)
 
 Jalankan unit test, browser-test typecheck, E2E, dan build dari folder `dashboard`:
 
@@ -338,6 +346,7 @@ Berdasarkan proposal lokal di `docs/reference/ChainMind_Proposal.pdf`, matriks b
 | 5 — agent dan action groups | Implemented (mock) | [agents](./src/chainmind/agents/), [CDK stack](./infra/chainmind_stack.py) | unit-tested, synth-only |
 | 6 — workflow dan approval | Implemented (mock) | [workflow](./src/chainmind/workflow/), [approval API](./src/chainmind/api/main.py) | unit-tested, synth-only |
 | 7 — SAP/Ariba | Partial | [SAP sandbox](./sandbox/sap_sandbox/), [SAP clients](./src/chainmind/integrations/sap/) | sandbox-verified; needs real SAP |
+| 7 — live figure flow and tracking | Implemented (mock) | [Flow diagram](./dashboard/src/FlowDiagram.tsx), [proposal step audit](./src/chainmind/core/models.py), [tracking outputs](./src/chainmind/agents/tracking.py) | component-tested, Playwright/axe, pipeline-tested; AWS/SAP live needs real accounts |
 | 8 — notifikasi dan human approval | Implemented | [notification adapters](./src/chainmind/notifications/), [dashboard approval flow](./dashboard/src/) | unit-tested, Playwright, mock channels |
 | 9 — keamanan/operations | Partial | [JWT validation](./src/chainmind/api/), [CDK stack](./infra/chainmind_stack.py), [DEPLOY.md](./docs/DEPLOY.md) | synth-only; no live AWS/security certification |
 | 10 — dashboard/demo | Implemented | [dashboard](./dashboard/src/), [demo guide](./docs/DEMO.md), [screenshots](./docs/screenshots/) | unit-tested, build, Playwright |
@@ -348,6 +357,9 @@ Berdasarkan proposal lokal di `docs/reference/ChainMind_Proposal.pdf`, matriks b
 | 21 — bilingual/accessibility UI | Implemented | [translations](./dashboard/src/i18n.ts), [dashboard](./dashboard/src/App.tsx), [Playwright checks](./dashboard/e2e/auth-workflow.spec.ts) | dashboard unit/build, Playwright axe scan and 375px/1280px checks |
 | 21 — model-agnostic Bedrock configuration | Implemented (adapter configuration) | [settings](./src/chainmind/core/config.py), [Bedrock adapter](./src/chainmind/integrations/llm/bedrock.py), [fallback adapter](./src/chainmind/integrations/llm/bedrock_agents.py) | unit-tested configuration; model access and runtime behavior need real AWS |
 | 22 — release and cost readiness | Implemented (scaffold) | [CHANGELOG](./CHANGELOG.md), [CDK budget/tags](./infra/chainmind_stack.py), [deployment cost notes](./docs/DEPLOY.md), [jury pack](./docs/JURY_PACK.md) | CDK assertions and synth-only; live budget email and actual pricing need account review |
+| 23–24 — flow, presenter and replay | Implemented (mock) | [Flow page](./dashboard/src/FlowDiagram.tsx), [replay generator](./scripts/generate_replay_fixture.py), [preflight](./scripts/preflight.py), [video script](./docs/VIDEO_SCRIPT.md) | 15 dashboard tests, 10 Playwright tests including axe, presenter and replay; fixture is read-only |
+| 25 — proposal fidelity | Implemented (locally checkable claims) | [fidelity tests](./tests/test_proposal_fidelity.py), [tracking outputs](./src/chainmind/agents/tracking.py), [coverage](./docs/COVERAGE.md) | backend/API tests and mocked S3 archive; not real AWS/SAP |
+| 26 — account readiness | Implemented (checklist/validator) | [go-live checklist](./docs/GO_LIVE.md), [offline config validation](./scripts/validate_config.py) | validator unit-tested; account verifiers require operator access |
 | 13 — roadmap implementasi dan MVP | Partial | [demo guide](./docs/DEMO.md), [coverage audit](./docs/COVERAGE.md) | demo/sandbox verified; SAP BTP pilot remains a prerequisite |
 | 15 — risk | Partial | [risk register draft](./docs/BUSINESS.md) | documentation-only |
 | 16 — pendanaan / placeholders | Partial | [business draft](./docs/BUSINESS.md) | placeholders; no validated budget |

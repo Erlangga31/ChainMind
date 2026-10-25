@@ -46,11 +46,13 @@ export interface PurchaseOrder {
   total_price: number;
   currency: string;
   terms: string;
+  expected_date?: string | null;
   status: string;
 }
 
 export interface DisruptionRun {
   run_id: string;
+  revision_count?: number;
   status: RunStatus;
   severity: string | null;
   significant: boolean;
@@ -87,6 +89,7 @@ export interface DisruptionRun {
     input_summary: string;
     output_summary: string;
     reasoning: string;
+    proposal_step?: number | null;
   }[];
   draft_po: PurchaseOrder | null;
   execution_tracking: {
@@ -111,6 +114,11 @@ export interface DisruptionRun {
     line_stoppage_avoided: boolean;
     eta_deviation_days: number;
     alert: string | null;
+    monitoring_outputs: {
+      kind: "shipment" | "eta" | "inventory" | "deviation" | "kpi";
+      status: string;
+      summary: string;
+    }[];
     simulated: boolean;
   } | null;
   kpis: {

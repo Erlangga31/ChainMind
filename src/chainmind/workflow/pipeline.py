@@ -77,6 +77,15 @@ class DisruptionPipeline:
         if existing is not None:
             return existing
         run = DisruptionRun(event=event, tenant_id=event.tenant_id)
+        run.audit_log.append(
+            AuditEntry(
+                agent="event_ingestion",
+                input_summary=f"source={event.source}; event_id={event.event_id}",
+                output_summary="External disruption accepted for analysis.",
+                reasoning="The event was stored before the sequential agent workflow started.",
+                proposal_step=1,
+            )
+        )
         self._store.save(run)
         try:
             self._transition(run, WorkflowState.MONITORING)
@@ -107,6 +116,7 @@ class DisruptionPipeline:
                         f"{inventory.daily_consumption:,} units consumed per day."
                     ),
                     reasoning="Retrieved the stock-of-record snapshot used for this analysis.",
+                    proposal_step=2,
                 )
             )
 
@@ -115,7 +125,7 @@ class DisruptionPipeline:
             run.significant = monitoring.significant
             run.affected_records = monitoring.affected_records
             run.chain_of_thought.append(monitoring.reasoning)
-            run.audit_log.append(audit_for(monitoring, event.model_dump_json()))
+            run.audit_log.append(audit_for(monitoring, event.model_dump_json(), proposal_step=2))
             run.stages.append(
                 StageResult(name="Monitoring", status="COMPLETED", summary=monitoring.summary)
             )
@@ -136,6 +146,7 @@ class DisruptionPipeline:
                 audit_for(
                     logistics,
                     f"delay={event.delay_days:g}; inventory={inventory.model_dump_json()}",
+                    proposal_step=3,
                 )
             )
             run.stages.append(
@@ -161,6 +172,7 @@ class DisruptionPipeline:
                 audit_for(
                     procurement,
                     f"component={inventory.component_id}; quantity={inventory.purchase_quantity}",
+                    proposal_step=4,
                 )
             )
             run.stages.append(
@@ -200,6 +212,7 @@ class DisruptionPipeline:
                     orchestration,
                     f"inaction_cost={logistics.cost_of_inaction:.2f}; "
                     f"vendors={len(procurement.evaluations)}",
+                    proposal_step=5,
                 )
             )
             if orchestration.fallback_used:
@@ -210,6 +223,7 @@ class DisruptionPipeline:
                         output_summary="A deterministic explanation fallback was used.",
                         reasoning=orchestration.fallback_reason
                         or "The model output did not pass validation.",
+                        proposal_step=5,
                     )
                 )
             run.audit_log.append(
@@ -220,6 +234,7 @@ class DisruptionPipeline:
                     reasoning=(
                         "A draft is stored for human review; no financial transaction was executed."
                     ),
+                    proposal_step=6,
                 )
             )
             run.audit_log.append(
@@ -230,6 +245,7 @@ class DisruptionPipeline:
                     reasoning=(
                         "The draft is linked to a human approval task; it remains unexecuted."
                     ),
+                    proposal_step=6,
                 )
             )
             run.stages.append(
@@ -378,6 +394,7 @@ class DisruptionPipeline:
                     input_summary=f"run_id={run.run_id}",
                     output_summary="Draft purchase order rejected.",
                     reasoning=decision.note or "Rejected by human reviewer.",
+                    proposal_step=8,
                 )
             )
             self._complete_decision(
@@ -413,6 +430,7 @@ class DisruptionPipeline:
                 input_summary=f"run_id={run.run_id}; po_id={run.draft_po.po_id}",
                 output_summary=f"Approved and executed as {sap_reference}.",
                 reasoning=decision.note or "Explicit human approval recorded.",
+                proposal_step=8,
             )
         )
         self._complete_decision(run, "Human approval", "APPROVED", "PO execution", "EXECUTED")
@@ -515,6 +533,7 @@ class DisruptionPipeline:
                     input_summary=f"run_id={run.run_id}; po_id={run.draft_po.po_id}",
                     output_summary=f"Supplier tracking did not complete: {exc.code}.",
                     reasoning=exc.message,
+                    proposal_step=8,
                 )
             )
             run.updated_at = datetime.now(UTC)
@@ -546,6 +565,7 @@ class DisruptionPipeline:
                     "Supplier confirmation, advance shipment notice, and future stock "
                     "projection were reconciled after explicit approval."
                 ),
+                proposal_step=8,
             )
         )
         if tracking.alert:
@@ -555,6 +575,7 @@ class DisruptionPipeline:
                     input_summary=f"tracking_id={shipment.tracking_id}",
                     output_summary=tracking.alert,
                     reasoning="The reported ETA exceeds the selected vendor's quoted lead time.",
+                    proposal_step=8,
                 )
             )
             if (
@@ -596,6 +617,7 @@ class DisruptionPipeline:
                     input_summary=f"run_id={run.run_id}; event={event_kind}",
                     output_summary=f"Notification delivery failed: {exc.code}.",
                     reasoning=exc.message,
+                    proposal_step=7 if event_kind == "draft_ready" else 8,
                 )
             )
             self._store.save(run)
@@ -608,6 +630,7 @@ class DisruptionPipeline:
                     f"Notification delivered to {self._notifications.channel_count} channel(s)."
                 ),
                 reasoning=self._notifications.audit_summary(message),
+                proposal_step=7 if event_kind == "draft_ready" else 8,
             )
         )
         self._store.save(run)
@@ -706,6 +729,7 @@ class DisruptionPipeline:
             audit_for(
                 revised,
                 f"requested_vendor={decision.vendor_id}; note={decision.note}",
+                proposal_step=5,
             )
         )
         if revised.fallback_used:
@@ -716,6 +740,7 @@ class DisruptionPipeline:
                     output_summary="A deterministic explanation fallback was used.",
                     reasoning=revised.fallback_reason
                     or "The model output did not pass validation.",
+                    proposal_step=5,
                 )
             )
         run.audit_log.append(
@@ -724,6 +749,7 @@ class DisruptionPipeline:
                 input_summary=f"Revised PO for {decision.vendor_id}.",
                 output_summary=f"New draft PO {run.draft_po.po_id} remains pending approval.",
                 reasoning="Revision creates a replacement draft and does not execute it.",
+                proposal_step=6,
             )
         )
         run.stages = [

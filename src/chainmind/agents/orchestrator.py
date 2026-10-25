@@ -1,5 +1,7 @@
 """Orchestrator agent for economic selection and draft purchase orders."""
 
+from datetime import date, timedelta
+
 from chainmind.core.errors import ChainMindError
 from chainmind.core.models import (
     InventorySnapshot,
@@ -102,4 +104,5 @@ class OrchestratorAgent:
             total_price=unit_price * quantity,
             currency=inventory.currency,
             terms=inventory.purchase_terms,
+            expected_date=date.today() + timedelta(days=selected.vendor.lead_time_days),
         )

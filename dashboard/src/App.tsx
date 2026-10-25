@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AgentReasoning,
   AuditViewer,
@@ -8,6 +8,7 @@ import {
   VendorCharts,
   WorkflowTimeline,
 } from "./components";
+import { FlowDiagram } from "./FlowDiagram";
 import type { ApiError, DisruptionRun, KPIReport, UsageReport } from "./types";
 import { formatNotification, translate, type Language } from "./i18n";
 
@@ -149,6 +150,11 @@ function randomBase64Url(size: number): string {
 }
 
 async function beginLogin(): Promise<void> {
+  if (new URLSearchParams(window.location.search).get("presenter") === "1") {
+    sessionStorage.setItem("chainmind.presenter", "true");
+  } else {
+    sessionStorage.removeItem("chainmind.presenter");
+  }
   const state = randomBase64Url(32);
   const nonce = randomBase64Url(32);
   const verifier = randomBase64Url(48);
@@ -219,7 +225,30 @@ function StatusPill({ status }: { status: string }) {
   return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${tone}`}>{status.replaceAll("_", " ")}</span>;
 }
 
+function presenterNarrations(language: Language): string[] {
+  return language === "id"
+    ? [
+        "Kapal pembawa Microchip X tertunda lima hari karena cuaca ekstrem; stok SAP hanya mencakup tiga hari.",
+        "Monitoring mengklasifikasikan gangguan dan Logistics menghitung risiko stockout dua hari.",
+        "Procurement membandingkan empat vendor berdasarkan lead time, biaya, kapasitas, dan risiko.",
+        "Orchestrator memilih Vendor B: tiba dua hari, total $135.000, dengan Air Freight.",
+        "Draf PO 5.000 pcs tetap PENDING_APPROVAL; tidak ada pembelian sebelum persetujuan manusia.",
+        "Setelah persetujuan, pantau konfirmasi, pengiriman, ETA, proyeksi stok, dan KPI ilustratif.",
+      ]
+    : [
+        "The Microchip X cargo ship is delayed five days by extreme weather; SAP stock covers three days.",
+        "Monitoring classifies the disruption and Logistics calculates two days of stockout risk.",
+        "Procurement compares four vendors by lead time, cost, capacity, and risk.",
+        "The Orchestrator selects Vendor B: two-day arrival, $135,000 total, by Air Freight.",
+        "The 5,000-piece draft PO remains PENDING_APPROVAL; no purchase occurs before human approval.",
+        "After approval, track confirmation, shipment, ETA, projected stock, and illustrative KPIs.",
+      ];
+}
+
 export default function App() {
+  const presenter =
+    new URLSearchParams(window.location.search).get("presenter") === "1" ||
+    sessionStorage.getItem("chainmind.presenter") === "true";
   const [language, setLanguage] = useState<Language>(
     () => (localStorage.getItem("chainmind.language") === "en" ? "en" : "id"),
   );
@@ -238,7 +267,7 @@ export default function App() {
   const [scenarioId, setScenarioId] = useState<(typeof SCENARIOS)[number]["id"]>("weather");
   const role = session?.role;
   const canApprove = role === "approver" || role === "admin";
-  const [page, setPage] = useState<"runs" | "kpis" | "usage">("runs");
+  const [page, setPage] = useState<"runs" | "flow" | "kpis" | "usage">("runs");
   const [apiMode, setApiMode] = useState("mock");
   const [kpis, setKpis] = useState<KPIReport | null>(null);
   const [usage, setUsage] = useState<UsageReport | null>(null);
@@ -247,6 +276,11 @@ export default function App() {
   const [notificationToken, setNotificationToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [apiUnavailable, setApiUnavailable] = useState(false);
+  const [replayMode, setReplayMode] = useState(false);
+  const [replayProgress, setReplayProgress] = useState(0);
+  const [presenterStep, setPresenterStep] = useState(0);
+  const presenterStarted = useRef(false);
   const t = (key: string) => translate(language, key);
 
   useEffect(() => {
@@ -358,30 +392,36 @@ export default function App() {
   }, [selectedId]);
 
   useEffect(() => {
-    if (!session) return;
+    if (!session || replayMode) return;
     void refreshRuns().catch((caught: unknown) => {
+      setApiUnavailable(true);
       setError(caught instanceof Error ? caught.message : "Could not load runs.");
     });
-  }, [refreshRuns, session]);
+  }, [refreshRuns, replayMode, session]);
 
   useEffect(() => {
-    if (!session) return;
+    if (!session || replayMode) return;
     void request<{ mode: string }>("/health")
-      .then((health) => setApiMode(health.mode))
+      .then((health) => {
+        setApiMode(health.mode);
+        setApiUnavailable(false);
+      })
       .catch((caught: unknown) => {
+        setApiUnavailable(true);
         setError(caught instanceof Error ? caught.message : "Could not read API mode.");
       });
-  }, [session]);
+  }, [replayMode, session]);
 
   useEffect(() => {
-    if (!session || busy) return;
+    if (!session || busy || replayMode) return;
     const timer = window.setInterval(() => {
       void refreshRuns().catch((caught: unknown) => {
+        setApiUnavailable(true);
         setError(caught instanceof Error ? caught.message : "Could not refresh live run status.");
       });
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [busy, refreshRuns, session]);
+  }, [busy, refreshRuns, replayMode, session]);
 
   useEffect(() => {
     const token = new URLSearchParams(window.location.search).get("approve");
@@ -398,22 +438,22 @@ export default function App() {
   }, [refreshRuns]);
 
   useEffect(() => {
-    if (!session || page !== "kpis") return;
+    if (!session || replayMode || page !== "kpis") return;
     void request<KPIReport>("/kpis")
       .then(setKpis)
       .catch((caught: unknown) => {
         setError(caught instanceof Error ? caught.message : "Could not load KPI data.");
       });
-  }, [page, session]);
+  }, [page, replayMode, session]);
 
   useEffect(() => {
-    if (!session || page !== "usage" || !canApprove) return;
+    if (!session || replayMode || page !== "usage" || !canApprove) return;
     void request<UsageReport>("/usage")
       .then(setUsage)
       .catch((caught: unknown) => {
         setError(caught instanceof Error ? caught.message : "Could not load usage data.");
       });
-  }, [canApprove, page, session]);
+  }, [canApprove, page, replayMode, session]);
 
   const feasibleVendors = useMemo(
     () => run?.vendor_comparison.filter((evaluation) => evaluation.feasible) ?? [],
@@ -424,12 +464,26 @@ export default function App() {
     [runs],
   );
   const pending = run?.status === "PENDING_APPROVAL";
+  const replayRun = useMemo(() => {
+    if (!run || !replayMode) return run;
+    return {
+      ...run,
+      stages: run.stages.map((stage, index) => ({
+        ...stage,
+        status: index < replayProgress
+          ? "COMPLETED"
+          : index === replayProgress
+            ? "IN_PROGRESS"
+            : "WAITING_FOR_APPROVAL",
+      })),
+    };
+  }, [replayMode, replayProgress, run]);
 
-  async function triggerDemo() {
+  async function triggerDemo(scenarioOverride?: string) {
     setBusy(true);
     setError("");
     try {
-      const scenario = SCENARIOS.find((item) => item.id === scenarioId) ?? SCENARIOS[0];
+      const scenario = SCENARIOS.find((item) => item.id === (scenarioOverride ?? scenarioId)) ?? SCENARIOS[0];
       const created = await request<{ run_id: string }>("/disruptions", {
         method: "POST",
         body: JSON.stringify({
@@ -443,6 +497,7 @@ export default function App() {
           source: "dashboard-demo",
         }),
       });
+      setApiUnavailable(false);
       await refreshRuns(created.run_id);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not trigger the demo disruption.");
@@ -451,9 +506,73 @@ export default function App() {
     }
   }
 
+  async function loadReplay() {
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/replay-run.json");
+      if (!response.ok) throw await responseError(response);
+      const fixture = await response.json() as DisruptionRun;
+      if (!fixture.run_id || !fixture.draft_po || fixture.vendor_comparison.length < 2) {
+        throw new Error("The replay fixture is incomplete and cannot be displayed.");
+      }
+      setRuns([fixture]);
+      setRun(fixture);
+      setSelectedId(fixture.run_id);
+      setReplayMode(true);
+      setReplayProgress(0);
+      setApiMode("replay");
+      setPage("flow");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load the recorded demo.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reconnectLive() {
+    setReplayMode(false);
+    setApiUnavailable(false);
+    setError("");
+    try {
+      const health = await request<{ mode: string }>("/health");
+      setApiMode(health.mode);
+      const items = await request<DisruptionRun[]>("/runs");
+      setRuns(items);
+      const nextRun = items[0] ?? null;
+      setSelectedId(nextRun?.run_id ?? "");
+      setRun(nextRun);
+      if (nextRun) setRun(await request<DisruptionRun>(`/runs/${nextRun.run_id}`));
+    } catch (caught) {
+      setApiUnavailable(true);
+      setError(caught instanceof Error ? caught.message : "Could not reconnect to the live API.");
+    }
+  }
+
+  useEffect(() => {
+    if (!presenter || !session || presenterStarted.current || replayMode) return;
+    presenterStarted.current = true;
+    setPage("flow");
+    void triggerDemo("weather");
+  }, [presenter, replayMode, session]);
+
+  useEffect(() => {
+    if (!replayMode || replayProgress >= 4) return;
+    const timer = window.setTimeout(
+      () => setReplayProgress((progress) => Math.min(progress + 1, 4)),
+      900,
+    );
+    return () => window.clearTimeout(timer);
+  }, [replayMode, replayProgress]);
+
   async function selectRun(runId: string) {
     setSelectedId(runId);
     setError("");
+    if (replayMode) {
+      const replay = runs.find((item) => item.run_id === runId);
+      setRun(replay ?? null);
+      return;
+    }
     try {
       setRun(await request<DisruptionRun>(`/runs/${runId}`));
     } catch (caught) {
@@ -484,7 +603,7 @@ export default function App() {
   }
 
   async function confirmDecision() {
-    if (!run || !pendingDecision || !decisionConfirmed || !canApprove) return;
+    if (!run || !pendingDecision || !decisionConfirmed || !canApprove || replayMode) return;
     if (!run) return;
     setBusy(true);
     setError("");
@@ -525,6 +644,10 @@ export default function App() {
     setRun(null);
     setSelectedId("");
     setPage("runs");
+    setReplayMode(false);
+    setReplayProgress(0);
+    setApiUnavailable(false);
+    sessionStorage.removeItem("chainmind.presenter");
     setUsage(null);
     setKpis(null);
     setError("");
@@ -552,6 +675,7 @@ export default function App() {
             {t("signInDescription")}
           </p>
           {error && <p role="alert" className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
+          {apiUnavailable && <p className="mt-3 text-xs text-slate-500">{t("replayRequiresSignIn")}</p>}
           <button
             className="mt-6 w-full rounded-xl bg-accent px-5 py-3 font-semibold text-white"
             onClick={() => void beginLogin().catch((caught: unknown) => {
@@ -588,7 +712,7 @@ export default function App() {
             />
             <button className="rounded-lg border border-slate-500 px-3 py-1 text-xs text-white" onClick={logout}>{t("logout")}</button>
             <span className="rounded-full border border-teal-300/40 px-3 py-1 text-xs font-semibold text-teal-200">
-              {apiMode === "mock" ? "MOCK MODE" : `${apiMode.toUpperCase()} MODE`}
+              {replayMode ? "REPLAY" : apiMode === "mock" ? "MOCK MODE" : `${apiMode.toUpperCase()} MODE`}
             </span>
           </div>
         </div>
@@ -615,17 +739,51 @@ export default function App() {
                 {SCENARIOS.map((scenario) => <option key={scenario.id} value={scenario.id}>{t(scenario.label)}</option>)}
               </select>
             </label>
-            <button
+            {!replayMode && <button
               className="rounded-xl bg-accent px-5 py-3 font-semibold text-white shadow-sm transition-colors hover:bg-teal-800 disabled:cursor-wait disabled:opacity-60"
-              disabled={busy}
+              disabled={busy || replayMode}
               onClick={() => void triggerDemo()}
             >
               {busy ? t("working") : t("trigger")}
-            </button>
+            </button>}
           </div>
         </section>
 
-        {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div>}
+        {error && (
+          <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+            <span>{error}</span>
+            {apiUnavailable && !replayMode && (
+              <button className="rounded-lg border border-rose-300 bg-white px-3 py-2 font-semibold" disabled={busy} onClick={() => void loadReplay()}>
+                {busy ? t("working") : t("loadReplay")}
+              </button>
+            )}
+          </div>
+        )}
+
+        {replayMode && (
+          <div role="status" aria-label="Replay mode" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold text-amber-950">
+            <span>REPLAY · {t("replayReadOnly")}</span>
+            <button className="rounded-lg border border-amber-500 bg-white px-3 py-2" onClick={() => void reconnectLive()}>{t("reconnectLive")}</button>
+          </div>
+        )}
+
+        {presenter && (
+          <section aria-label={t("presenterMode")} className="rounded-2xl bg-ink p-5 text-white shadow-card">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-widest text-teal-200">{t("presenterMode")} · {presenterStep + 1}/{presenterNarrations(language).length}</p>
+                <p aria-live="polite" className="mt-2 max-w-4xl text-lg font-semibold leading-7">{presenterNarrations(language)[presenterStep]}</p>
+              </div>
+              <button
+                className="rounded-lg bg-teal-300 px-4 py-2 font-bold text-ink disabled:opacity-50"
+                disabled={presenterStep >= presenterNarrations(language).length - 1}
+                onClick={() => setPresenterStep((step) => Math.min(step + 1, presenterNarrations(language).length - 1))}
+              >
+                {t("next")}
+              </button>
+            </div>
+          </section>
+        )}
 
         <section aria-label={t("notificationFeed")} className="rounded-2xl bg-white p-5 shadow-card">
           <h2 className="text-lg font-bold text-ink">{t("notificationFeed")}</h2>
@@ -653,7 +811,7 @@ export default function App() {
                     <div className="flex gap-2">
                       <button
                         className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-                        disabled={busy || !canApprove}
+                        disabled={busy || !canApprove || replayMode}
                         onClick={() => void openNotificationApproval(item.run_id)}
                       >
                         {t("approve")}
@@ -674,13 +832,16 @@ export default function App() {
 
         <nav className="flex flex-wrap gap-2" aria-label={t("dashboardSections")}>
           <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "runs" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("runs")}>{t("disruptions")}</button>
-          <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "kpis" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("kpis")}>{t("kpis")}</button>
-          {canApprove && (
+          <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "flow" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("flow")}>{t("flowTitle")}</button>
+          {!replayMode && <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "kpis" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("kpis")}>{t("kpis")}</button>}
+          {canApprove && !presenter && !replayMode && (
             <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "usage" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("usage")}>{t("usagePlan")}</button>
           )}
         </nav>
 
-        {page === "kpis" ? (
+        {page === "flow" ? (
+          replayRun ? <FlowDiagram run={replayRun} language={language} /> : <div className="rounded-xl bg-white p-6 text-slate-500">{t("selectRunForFlow")}</div>
+        ) : page === "kpis" ? (
           kpis ? <KpiCards report={kpis} language={language} /> : <div className="rounded-xl bg-white p-6 text-slate-500">{language === "id" ? "Memuat data KPI…" : "Loading KPI data…"}</div>
         ) : page === "usage" ? (
           usage ? <UsageCard report={usage} language={language} /> : <div className="rounded-xl bg-white p-6 text-slate-500">{language === "id" ? "Memuat data penggunaan…" : "Loading usage data…"}</div>
@@ -689,7 +850,7 @@ export default function App() {
           <aside className="h-fit rounded-2xl bg-white p-4 shadow-card">
             <div className="mb-3 flex items-center justify-between px-2">
               <h2 className="font-bold text-ink">{t("disruptionRuns")}</h2>
-              <button className="text-xs font-semibold text-accent hover:underline" onClick={() => void refreshRuns()}>{t("refresh")}</button>
+              <button className="text-xs font-semibold text-accent hover:underline disabled:opacity-50" disabled={replayMode} onClick={() => void refreshRuns()}>{t("refresh")}</button>
             </div>
             {runs.length === 0 ? (
               <p className="px-2 py-6 text-sm text-slate-500">{t("noRuns")}</p>
@@ -749,6 +910,14 @@ export default function App() {
                     <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">{t("lineStoppage")}<strong className="mt-1 block text-ink">{run.execution_tracking.line_stoppage_avoided ? t("avoidedSimulated") : t("notAvoided")}</strong></p>
                   </div>
                   {run.execution_tracking.alert && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{run.execution_tracking.alert}</p>}
+                  <ul aria-label={t("monitoringTrackingOutputs")} className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                    {run.execution_tracking.monitoring_outputs.map((output) => (
+                      <li key={output.kind} className="rounded-xl border border-slate-200 p-3 text-sm">
+                        <strong className="block text-ink">{t(`tracking.${output.kind}`)} · {output.status}</strong>
+                        <span className="mt-1 block text-slate-600">{output.summary}</span>
+                      </li>
+                    ))}
+                  </ul>
                   {run.kpis && (
                     <div className="mt-4 border-t border-slate-100 pt-4">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t("illustrativePerRun")}</p>
@@ -808,10 +977,12 @@ export default function App() {
                           <p className="text-slate-500">{t("unitPrice")} <strong className="block text-ink">{money(run.draft_po.unit_price)}</strong></p>
                           <p className="text-slate-500">{t("total")} <strong className="block text-ink">{money(run.draft_po.total_price)}</strong></p>
                           <p className="text-slate-500">{t("terms")} <strong className="block text-ink">{run.draft_po.terms}</strong></p>
+                          <p className="text-slate-500">{t("expectedDate")} <strong className="block text-ink">{run.draft_po.expected_date ?? "—"}</strong></p>
+                          <p className="col-span-2 text-slate-500">{t("poNumber")} <strong className="block text-ink">DRAFT-{run.draft_po.po_id.replace(/[^a-z0-9]/gi, "").slice(0, 4).toUpperCase()}</strong></p>
                           {run.draft_po.sap_reference && <p className="col-span-2 text-slate-500">{t("sapReference")} <strong className="block text-ink">{run.draft_po.sap_reference}</strong></p>}
                         </div>
                       </div>
-                      {pending && canApprove && (
+                      {pending && canApprove && !replayMode && (
                         <div className="mt-4 space-y-3">
                           <label className="block text-sm font-medium text-slate-700">{t("decisionNote")}
                             <input className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" value={decisionNote} onChange={(event) => setDecisionNote(event.target.value)} placeholder={t("optionalAuditNote")} />

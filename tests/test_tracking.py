@@ -78,6 +78,18 @@ def test_tracking_projects_stock_and_marks_illustrative_savings() -> None:
     assert tracking.line_stoppage_avoided is True
     assert tracking.eta_deviation_days == 0
     assert tracking.alert is None
+    assert [output.kind for output in tracking.monitoring_outputs] == [
+        "shipment",
+        "eta",
+        "inventory",
+        "deviation",
+        "kpi",
+    ]
+    assert tracking.monitoring_outputs[0].status == "MONITORING"
+    assert tracking.monitoring_outputs[1].status == "UPDATED"
+    assert tracking.monitoring_outputs[2].status == "PROJECTED"
+    assert tracking.monitoring_outputs[3].status == "CLEAR"
+    assert tracking.monitoring_outputs[4].status == "ACHIEVED"
     assert kpis.simulated is True
     assert kpis.illustrative_savings == 15000
     assert kpis.estimated_stockout_days_avoided == 2
@@ -107,5 +119,7 @@ def test_late_or_partial_confirmation_flags_deviation_and_line_risk() -> None:
 
     assert tracking.eta_deviation_days == 3
     assert tracking.alert is not None
+    assert tracking.monitoring_outputs[3].status == "ALERT"
+    assert tracking.monitoring_outputs[4].status == "NOT_ACHIEVED"
     assert tracking.line_stoppage_avoided is False
     assert kpis.estimated_stockout_days_avoided == 0
