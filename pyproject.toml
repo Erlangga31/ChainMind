@@ -22,7 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "aws-cdk-lib>=2.200.0",
-    "cdk-nag>=2.35.0,<3.0.0",
+    "cdk-nag>=2.35.0,<4.0.0",
     "constructs>=10.4.2,<11.0.0",
     "jsonschema>=4.22",
     "python-pptx>=1.0.2",
