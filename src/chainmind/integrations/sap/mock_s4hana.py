@@ -4,6 +4,7 @@ import json
 from importlib.resources import files
 
 from chainmind.core.errors import IntegrationError
+from chainmind.core.master_data import SQLiteMasterDataStore
 from chainmind.core.models import (
     AffectedSupplyChainRecords,
     DisruptionEvent,
@@ -16,12 +17,14 @@ from chainmind.core.models import (
 class MockSAPS4HANAClient:
     """OData-like local adapter for inventory reads and purchase-order records."""
 
-    def __init__(self) -> None:
+    def __init__(self, master_data_store: SQLiteMasterDataStore | None = None) -> None:
+        self._master_data = master_data_store
         self._inventory: dict[str, InventorySnapshot] = {}
         self._orders: dict[str, PurchaseOrder] = {}
         self._supply_chain_records: dict[str, dict[str, list[str]]] = {}
         self._projections: dict[str, InventoryProjection] = {}
-        self._load_inventory()
+        if self._master_data is None:
+            self._load_inventory()
         raw_records = (
             files("chainmind.data")
             .joinpath("seed_supply_chain_records.json")
@@ -44,9 +47,18 @@ class MockSAPS4HANAClient:
         )
         self._inventory.update({snapshot.component_id: snapshot for snapshot in snapshots})
 
-    def get_inventory(self, component_id: str) -> InventorySnapshot:
+    def get_inventory(self, component_id: str, tenant_id: str = "demo") -> InventorySnapshot:
         """Return an OData-like inventory record."""
 
+        if self._master_data is not None:
+            self._master_data.bootstrap_demo_data(tenant_id)
+            material = self._master_data.get("materials", tenant_id, component_id)
+            if material is None:
+                raise IntegrationError(
+                    f"SAP S/4HANA has no inventory for component '{component_id}'.",
+                    details={"component_id": component_id},
+                )
+            return material.inventory_snapshot(tenant_id)
         try:
             return self._inventory[component_id].model_copy(deep=True)
         except KeyError as exc:
@@ -59,6 +71,11 @@ class MockSAPS4HANAClient:
         """Match a disruption to seeded shipment and locally drafted order records."""
 
         seeded = self._supply_chain_records.get(event.component_id, {})
+        tenant_shipments = (
+            self._master_data.list("shipments", event.tenant_id)
+            if self._master_data is not None
+            else []
+        )
         open_orders = [
             *seeded.get("open_purchase_order_ids", []),
             *[
@@ -70,7 +87,16 @@ class MockSAPS4HANAClient:
         ]
         return AffectedSupplyChainRecords(
             component_id=event.component_id,
-            shipment_ids=seeded.get("shipment_ids", []),
+            shipment_ids=sorted(
+                {
+                    *seeded.get("shipment_ids", []),
+                    *[
+                        shipment.shipment_id
+                        for shipment in tenant_shipments
+                        if shipment.component_id == event.component_id
+                    ],
+                }
+            ),
             open_purchase_order_ids=sorted(set(open_orders)),
         )
 

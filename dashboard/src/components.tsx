@@ -87,7 +87,7 @@ export function ImpactPanel({
         <Metric label={translate(language, "estimatedLineLoss")} value={money(run.cost_of_inaction)} />
       </div>
       {run.material_impacts.length > 1 && (
-        <div className="mt-5 overflow-x-auto">
+        <div className="mt-5 overflow-x-auto" tabIndex={0} role="region" aria-label={translate(language, "bomImpact")}>
           <h3 className="mb-2 font-semibold text-ink">{translate(language, "bomImpact")}</h3>
           <table className="w-full min-w-[560px] text-left text-sm">
             <thead className="border-b text-xs uppercase text-slate-500">
@@ -288,7 +288,7 @@ export function KpiCards({
       <p className="mt-1 text-sm text-slate-600">
         {translate(language, "proposalBaselines")}
       </p>
-      <div className="mt-4 overflow-x-auto">
+      <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label={translate(language, "manualBaseline")}>
         <table className="w-full min-w-[560px] text-left text-sm">
           <thead className="border-b text-xs uppercase text-slate-500">
             <tr>

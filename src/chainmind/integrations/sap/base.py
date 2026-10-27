@@ -17,7 +17,7 @@ from chainmind.core.models import (
 class SAPClient(Protocol):
     """Operations against SAP S/4HANA procurement and inventory."""
 
-    def get_inventory(self, component_id: str) -> InventorySnapshot:
+    def get_inventory(self, component_id: str, tenant_id: str = "demo") -> InventorySnapshot:
         """Read the current inventory and production economics."""
 
     def find_affected_records(self, event: DisruptionEvent) -> AffectedSupplyChainRecords:

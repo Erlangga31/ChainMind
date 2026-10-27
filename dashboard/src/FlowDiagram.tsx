@@ -127,7 +127,7 @@ export function FlowDiagram({ run, language = "id" }: { run: DisruptionRun; lang
   return (
     <section aria-label={translate(language, "flowTitle")} className="space-y-4">
       <h2 className="text-xl font-bold text-ink">{translate(language, "flowTitle")}</h2>
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-3">
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-3" tabIndex={0} role="region" aria-label={translate(language, "flowDiagram")}>
         <svg
           aria-label={translate(language, "flowDiagram")}
           className="h-auto min-w-[900px] w-full"

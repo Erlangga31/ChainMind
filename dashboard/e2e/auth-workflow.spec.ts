@@ -50,11 +50,17 @@ async function triggerScenario(
   scenario?: string,
   language: "id" | "en" = "en",
 ) {
-  if (scenario) {
-    await page.getByRole("combobox", { name: "Disruption scenario" }).selectOption(scenario);
-  }
+  await page.getByText(language === "id" ? "Gangguan baru" : "New disruption").click();
+  await page.getByRole("textbox", { name: language === "id" ? "Judul gangguan" : "Disruption title" }).fill(title);
+  await page.getByRole("textbox", { name: language === "id" ? "Deskripsi gangguan" : "Disruption description" }).fill(`${title} reported by operator.`);
+  await page.getByRole("textbox", { name: "Material ID" }).fill("microchip-x");
+  await page.getByRole("textbox", { name: language === "id" ? "Nama material" : "Material name" }).fill("Microchip X");
+  await page.getByRole("spinbutton", { name: language === "id" ? "Hari keterlambatan" : "Delay days" }).fill(scenario === "vendor_failure" ? "4" : "5");
+  await page.getByRole("combobox", { name: language === "id" ? "Jenis gangguan" : "Event type" }).selectOption(
+    scenario === "port_congestion" ? "logistics_delay" : scenario ?? "weather",
+  );
   const trigger = page.getByRole("button", {
-    name: language === "id" ? "Picu gangguan demo" : "Trigger demo disruption",
+    name: language === "id" ? "Analisis gangguan" : "Analyze disruption",
   });
   await expect(trigger).toBeEnabled();
   await trigger.click();
@@ -84,8 +90,8 @@ test("approver resolves weather disruption and completes execution tracking", as
   const charts = page
     .locator("section")
     .filter({ has: page.getByRole("heading", { name: "Cost vs lead time" }) });
-  await expect(charts).toBeVisible();
-  await charts.screenshot({ path: resolve(screenshotDirectory, "vendor-charts.png") });
+  await expect(charts.last()).toBeVisible();
+  await charts.last().screenshot({ path: resolve(screenshotDirectory, "vendor-charts.png") });
   await saveSection(page, "Chain of Thought summary", "chain-of-thought.png");
   await notifications.screenshot({
     path: resolve(screenshotDirectory, "notification-feed.png"),
@@ -118,7 +124,7 @@ test("viewer can inspect a draft but cannot approve it", async ({ page }) => {
   await signIn(page, "viewer");
   await triggerScenario(page, "Extreme weather delays cargo ship", "weather");
   const notifications = page.getByRole("region", { name: "Notification feed" });
-  await expect(notifications.getByText(/Vendor B at \$135,000/)).toBeVisible();
+  await expect(notifications.getByText(/Vendor B at \$135,000/).first()).toBeVisible();
   await expect(notifications.getByRole("button", { name: "Approve" })).toBeDisabled();
   await expect(notifications.getByRole("button", { name: "View details" })).toBeEnabled();
   await expect(page.getByText(/Viewer access is read-only/)).toBeVisible();
@@ -149,7 +155,7 @@ test("Indonesian dashboard is accessible and responsive", async ({ page }) => {
     .locator("section")
     .filter({ has: page.getByRole("heading", { name: "Biaya vs waktu pengiriman" }) });
   if (await chartSection.count()) {
-    await chartSection.screenshot({
+    await chartSection.last().screenshot({
       path: resolve(screenshotDirectory, "vendor-charts-id.png"),
     });
   }
@@ -255,7 +261,7 @@ test("presenter mode auto-runs the weather fixture and advances narration", asyn
 });
 
 test("offline replay loads the generated mock run read-only when the API is unavailable", async ({ page }) => {
-  await page.route("http://localhost:8000/**", (route) =>
+  await page.route("http://127.0.0.1:18000/**", (route) =>
     route.fulfill({ status: 503, contentType: "application/json", body: '{"detail":"API unavailable"}' }),
   );
   await signIn(page, "approver");
@@ -263,8 +269,49 @@ test("offline replay loads the generated mock run read-only when the API is unav
   await expect(page.getByRole("status", { name: "Replay mode" })).toContainText("REPLAY");
   await expect(page.getByRole("img", { name: "Live end-to-end disruption resolution flow" })).toBeVisible();
   await expect(page.getByText("Vendor B: 2d")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Trigger demo disruption" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Analyze disruption" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Usage & Plan" })).toHaveCount(0);
+});
+
+test("dashboard fits projector and mobile viewports with bilingual light and dark screenshots", async ({ page }) => {
+  await signIn(page, "approver", "en");
+  const screenshotDirectory = resolve(process.cwd(), "../docs/screenshots");
+  for (const language of ["en", "id"] as const) {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.getByRole("group").getByRole("button", { name: language === "en" ? "EN" : "ID" }).click();
+    for (const theme of ["light", "dark"] as const) {
+      const currentTheme = await page.locator("html").getAttribute("data-theme");
+      if (currentTheme !== theme) {
+        await page.getByRole("button", { name: language === "id" ? "Ganti tema" : "Toggle theme" }).click();
+      }
+      const dimensions = await page.evaluate(() => {
+        const element = document.scrollingElement;
+        return {
+          clientHeight: element?.clientHeight ?? 0,
+          scrollHeight: element?.scrollHeight ?? 0,
+          clientWidth: element?.clientWidth ?? 0,
+          scrollWidth: element?.scrollWidth ?? 0,
+        };
+      });
+      expect(dimensions.scrollHeight).toBeLessThanOrEqual(dimensions.clientHeight + 1);
+      expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth + 1);
+      await page.screenshot({
+        path: resolve(screenshotDirectory, `dashboard-${language}-${theme}.png`),
+      });
+    }
+  }
+  await page.setViewportSize({ width: 375, height: 667 });
+  const mobileDimensions = await page.evaluate(() => {
+    const element = document.scrollingElement;
+    return {
+      clientHeight: element?.clientHeight ?? 0,
+      scrollHeight: element?.scrollHeight ?? 0,
+      clientWidth: element?.clientWidth ?? 0,
+      scrollWidth: element?.scrollWidth ?? 0,
+    };
+  });
+  expect(mobileDimensions.scrollHeight).toBeLessThanOrEqual(mobileDimensions.clientHeight + 1);
+  expect(mobileDimensions.scrollWidth).toBeLessThanOrEqual(mobileDimensions.clientWidth + 1);
 });
 
 for (const [id, title] of [

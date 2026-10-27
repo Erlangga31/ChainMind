@@ -9,6 +9,8 @@ stok, dampak produksi dan pemasok alternatif, lalu menyiapkan draf PO untuk diti
 Pada skenario demo, kapal Microchip X terlambat 5 hari, stok hanya cukup 3 hari, dan Vendor B
 menjadi rekomendasi. Persetujuan manusia wajib sebelum eksekusi; demo menggunakan SAP sandbox
 dan AWS LocalStack/CDK synth, bukan layanan produksi.
+Preset cuaca tersebut adalah data demo deterministik. Penggunaan biasa memakai master data dan
+event tenant yang dibuat atau diimpor di Data Studio; analisis berjalan atas data tersimpan.
 
 ### 30-second summary
 
@@ -24,6 +26,16 @@ AWS LocalStack/CDK synthesis, not production services.
 
 ![Alur gangguan ChainMind](./docs/screenshots/flow-id.png)
 
+### Dashboard previews
+
+| English · light | English · dark |
+| --- | --- |
+| ![Dashboard English light theme](./docs/screenshots/dashboard-en-light.png) | ![Dashboard English dark theme](./docs/screenshots/dashboard-en-dark.png) |
+
+| Indonesia · light | Indonesia · dark |
+| --- | --- |
+| ![Dashboard Indonesian light theme](./docs/screenshots/dashboard-id-light.png) | ![Dashboard Indonesian dark theme](./docs/screenshots/dashboard-id-dark.png) |
+
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/Dashboard-React-61DAFB?logo=react&logoColor=20232A)](https://react.dev/)
@@ -38,6 +50,10 @@ Rantai pasok manufaktur memerlukan lebih dari sekadar alarm ketika pengiriman te
 Sistem ERP tradisional berperan sebagai **system of record**: SAP menyimpan stok, data pemasok, dan transaksi. ChainMind menambahkan lapisan **system of action**: sejumlah agent mengubah sinyal gangguan menjadi analisis dampak, perbandingan vendor, dan draf PO yang dapat ditinjau manusia. Persetujuan manusia tetap menjadi batas wajib sebelum eksekusi.
 
 ## Skenario demo
+
+Angka di bawah adalah preset demo presenter, bukan nilai bawaan yang dipaksakan ke semua tenant.
+Data Studio menyediakan CRUD, import/export CSV/JSON, template, reset demo, clear, dan generator
+sample deterministik.
 
 - Kapal pengangkut Microchip X terlambat **5 hari** karena cuaca ekstrem.
 - Stok SAP S/4HANA hanya mencukupi **3 hari** produksi.
@@ -166,7 +182,7 @@ npm ci
 npm run dev
 ```
 
-Buka `http://localhost:5173`, klik **Sign in with ChainMind SSO**, lalu masuk sebagai `viewer` atau `approver` (password `demo`). Pilih skenario, lalu klik **Trigger demo disruption**. Dashboard menampilkan linimasa enam tahap, halaman **Flow/Alur** yang menyorot diagram proposal dari stage aktual, dampak stok, tabel serta grafik vendor, trace per sumber, audit log bernomor sesuai langkah proposal, feed notifikasi dengan sumber SAP, draf PO dengan dialog konfirmasi, tracking outputs, dan halaman KPI ilustratif. Viewer tetap read-only; hanya bearer token terverifikasi dengan role approver yang dapat mengirim keputusan. Tombol **Approve** pada feed hanya membuka dialog konfirmasi dan tidak mengeksekusi PO secara langsung.
+Buka `http://localhost:5173`, klik **Sign in with ChainMind SSO**, lalu masuk sebagai `viewer` atau `approver` (password `demo`). Masukkan gangguan baru dari halaman Disruptions. Approver/admin dapat membuka **Data Studio** untuk mengelola atau mengimpor material, vendor, shipment, dan event tenant; API memvalidasi record dan melaporkan kesalahan impor per baris. Nilai analisis dan KPI dihitung dari data tersimpan/run terkait, bukan dari nilai contoh yang tertanam di komponen dashboard. Viewer tetap read-only; hanya bearer token terverifikasi dengan role approver yang dapat mengirim keputusan.
 Gunakan `http://127.0.0.1:5173/?presenter=1` untuk mode presenter: setelah login, skenario cuaca
 otomatis dijalankan dan tombol **Lanjut / Next** menggerakkan narasi. Jika API tidak tersedia,
 opsi replay hanya-baca dapat memuat fixture hasil mock pipeline; badge **REPLAY** membedakannya dari
@@ -176,7 +192,9 @@ dan [GO_LIVE.md](./docs/GO_LIVE.md).
 Gunakan kontrol **ID/EN** untuk mengganti bahasa; dashboard, notifikasi, dan `run_demo.py`
 mendukung bahasa Indonesia dan Inggris. Tampilan kontras tinggi dan teks besar dapat diaktifkan dari
 kontrol aksesibilitas. Tabel vendor menampilkan wilayah/jarak dan dampak BOM menandai komponen
-paling kritis; seluruh ranking tetap deterministik.
+paling kritis; ranking dihitung deterministik oleh Python. Data JSON seed hanya dimuat saat store
+tenant masih kosong dan ditandai sebagai demo. Data Studio menyediakan aksi reset ke preset demo
+dan hapus seluruh data tenant. Generator dataset menerima seed sehingga keluaran dapat direproduksi.
 
 ![Dashboard ChainMind dengan draf PO Vendor B yang menunggu persetujuan](./docs/screenshots/chainmind-pending-approval.png)
 
@@ -391,9 +409,12 @@ Berdasarkan proposal lokal di `docs/reference/ChainMind_Proposal.pdf`, matriks b
 | 21 — bilingual/accessibility UI | Implemented | [translations](./dashboard/src/i18n.ts), [dashboard](./dashboard/src/App.tsx), [Playwright checks](./dashboard/e2e/auth-workflow.spec.ts) | dashboard unit/build, Playwright axe scan and 375px/1280px checks |
 | 21 — model-agnostic Bedrock configuration | Implemented (adapter configuration) | [settings](./src/chainmind/core/config.py), [Bedrock adapter](./src/chainmind/integrations/llm/bedrock.py), [fallback adapter](./src/chainmind/integrations/llm/bedrock_agents.py) | unit-tested configuration; model access and runtime behavior need real AWS |
 | 22 — release and cost readiness | Implemented (scaffold) | [CHANGELOG](./CHANGELOG.md), [CDK budget/tags](./infra/chainmind_stack.py), [deployment cost notes](./docs/DEPLOY.md), [jury pack](./docs/JURY_PACK.md) | CDK assertions and synth-only; live budget email and actual pricing need account review |
-| 23–24 — flow, presenter and replay | Implemented (mock) | [Flow page](./dashboard/src/FlowDiagram.tsx), [replay generator](./scripts/generate_replay_fixture.py), [preflight](./scripts/preflight.py), [video script](./docs/VIDEO_SCRIPT.md) | 15 dashboard tests, 10 Playwright tests including axe, presenter and replay; fixture is read-only |
+| 23–24 — flow, presenter and replay | Implemented (mock) | [Flow page](./dashboard/src/FlowDiagram.tsx), [replay generator](./scripts/generate_replay_fixture.py), [preflight](./scripts/preflight.py), [video script](./docs/VIDEO_SCRIPT.md) | 18 Vitest, 11 Playwright tests including axe, presenter and replay; fixture is read-only |
 | 25 — proposal fidelity | Implemented (locally checkable claims) | [fidelity tests](./tests/test_proposal_fidelity.py), [tracking outputs](./src/chainmind/agents/tracking.py), [coverage](./docs/COVERAGE.md) | backend/API tests and mocked S3 archive; not real AWS/SAP |
 | 26 — account readiness | Implemented (checklist/validator) | [go-live checklist](./docs/GO_LIVE.md), [offline config validation](./scripts/validate_config.py) | validator unit-tested; account verifiers require operator access |
+| 27 — fixed-viewport dashboard | Implemented | [dashboard shell](./dashboard/src/App.tsx), [bilingual theme screenshots](./docs/screenshots/) | 18 Vitest, 11 Playwright; 1280×720 and 375×667 document-scroll assertions |
+| 28 — tenant-supplied master data | Implemented (mock/sandbox) | [Data Studio](./dashboard/src/DataStudio.tsx), [SQLite/DynamoDB stores](./src/chainmind/core/master_data.py) | backend tests include CRUD, tenant isolation, imports, generator and custom-data pipeline; live weather polling not implemented |
+| 29 — v1.1.0 release package | Implemented locally | [changelog](./CHANGELOG.md), [coverage](./docs/COVERAGE.md), [slides](./docs/slides/), [rehearsal](./docs/REHEARSAL.md) | bilingual decks rebuilt and tested; CI/merge pending release push |
 | Pitch and rehearsal package | Implemented | [ID/EN slides](./docs/slides/), [reproducible builder](./scripts/build_slides.py), [Q&A](./docs/QNA.md), [rehearsal checklist](./docs/REHEARSAL.md) | test verifies 11 slides and speaker notes per deck |
 | 13 — roadmap implementasi dan MVP | Partial | [demo guide](./docs/DEMO.md), [coverage audit](./docs/COVERAGE.md) | demo/sandbox verified; SAP BTP pilot remains a prerequisite |
 | 15 — risk | Partial | [risk register draft](./docs/BUSINESS.md) | documentation-only |
@@ -413,7 +434,7 @@ Lihat [CONTRIBUTING.md](./CONTRIBUTING.md) untuk langkah instalasi, pemeriksaan,
 
 ## Rilis
 
-Versi proyek saat ini **1.0.0**. Lihat [CHANGELOG.md](./CHANGELOG.md) untuk ringkasan perubahan,
+Versi proyek saat ini **1.1.0**. Lihat [CHANGELOG.md](./CHANGELOG.md) untuk ringkasan perubahan,
 [JURY_PACK.md](./docs/JURY_PACK.md) untuk klaim dan bukti demo, serta [DEPLOY.md](./docs/DEPLOY.md)
 untuk checklist biaya dan deployment yang belum pernah dijalankan.
 

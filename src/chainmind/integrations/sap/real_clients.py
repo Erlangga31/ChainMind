@@ -166,9 +166,10 @@ class RealS4HANAClient:
     ) -> None:
         self._transport = transport or make_transport(settings or Settings())
 
-    def get_inventory(self, component_id: str) -> InventorySnapshot:
+    def get_inventory(self, component_id: str, tenant_id: str = "demo") -> InventorySnapshot:
         """Fetch and validate a stock snapshot from the OData material entity."""
 
+        del tenant_id
         payload = self._transport.request(
             "GET",
             MATERIAL_STOCK_PATH,

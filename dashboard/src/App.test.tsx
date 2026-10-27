@@ -76,7 +76,7 @@ describe("OIDC-authenticated approval dashboard", () => {
 
     expect(await screen.findByText(/Viewer access is read-only/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Review approval" })).not.toBeInTheDocument();
-    expect(screen.getByText("demo-viewer · viewer")).toBeInTheDocument();
+    expect(screen.getByText("demo · demo-viewer · viewer")).toBeInTheDocument();
     expect(sessionStorage.getItem("chainmind.access_token")).toBeNull();
     const feed = screen.getByRole("region", { name: "Notification feed" });
     expect(feed).toHaveTextContent(

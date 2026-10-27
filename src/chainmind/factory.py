@@ -8,6 +8,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from chainmind.core.config import Settings, get_settings
 from chainmind.core.errors import IntegrationError
 from chainmind.core.events import RunStore, SQLiteEventStore
+from chainmind.core.master_data import SQLiteMasterDataStore
 from chainmind.integrations.aws.event_store import DynamoDBEventStore
 from chainmind.integrations.llm.base import LLMClient
 from chainmind.integrations.llm.bedrock import BedrockLLMClient
@@ -56,13 +57,18 @@ def create_llm_client(settings: Settings | None = None) -> LLMClient:
 
 def create_sap_clients(
     settings: Settings | None = None,
+    master_data_store: SQLiteMasterDataStore | None = None,
 ) -> tuple[SAPClient, AribaClient, ApprovalWorkflowClient]:
     """Build the configured mock, sandbox, or Integration Suite SAP adapters."""
 
     config = settings or get_settings()
     backend = config.resolved_sap_backend
     if backend == "mock":
-        return MockSAPS4HANAClient(), MockAribaClient(), InMemoryApprovalWorkflowClient()
+        return (
+            MockSAPS4HANAClient(master_data_store),
+            MockAribaClient(master_data_store),
+            InMemoryApprovalWorkflowClient(),
+        )
     if backend == "sandbox":
         base_url = config.sap_workflow_base_url.rstrip("/")
         transport = make_transport(
@@ -162,11 +168,15 @@ def create_pipeline(
     ariba_client: AribaClient | None = None,
     llm_client: LLMClient | None = None,
     notification_service: NotificationService | None = None,
+    master_data_store: SQLiteMasterDataStore | None = None,
 ) -> DisruptionPipeline:
     """Build a pipeline using independently configured SAP and model adapters."""
 
     config = settings or get_settings()
-    sap, ariba, workflow = create_sap_clients(config)
+    master_data = master_data_store
+    if master_data is None and config.mode == "mock" and config.resolved_sap_backend == "mock":
+        master_data = SQLiteMasterDataStore(config.event_database_path)
+    sap, ariba, workflow = create_sap_clients(config, master_data)
     llm = create_llm_client(config)
     return DisruptionPipeline(
         sap=sap_client or sap,

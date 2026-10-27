@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from importlib.resources import files
 
 from chainmind.core.errors import IntegrationError
+from chainmind.core.master_data import SQLiteMasterDataStore
 from chainmind.core.models import (
     DisruptionEvent,
     PurchaseOrder,
@@ -17,7 +18,8 @@ from chainmind.core.models import (
 class MockAribaClient:
     """Return deterministic alternative supplier quotes with OData-like data."""
 
-    def __init__(self) -> None:
+    def __init__(self, master_data_store: SQLiteMasterDataStore | None = None) -> None:
+        self._master_data = master_data_store
         raw = files("chainmind.data").joinpath("seed_vendors.json").read_text(encoding="utf-8")
         self._vendors = [Vendor.model_validate(item) for item in json.loads(raw)]
         self._submitted: dict[str, PurchaseOrder] = {}
@@ -25,7 +27,15 @@ class MockAribaClient:
     def list_alternative_vendors(self, event: DisruptionEvent) -> list[Vendor]:
         """Return seeded supplier offers for the requested component."""
 
-        del event
+        if self._master_data is not None:
+            material = self._master_data.get("materials", event.tenant_id, event.component_id)
+            if material is None:
+                return []
+            return [
+                offer.as_vendor(material.purchase_quantity)
+                for offer in self._master_data.list("vendors", event.tenant_id)
+                if event.component_id in offer.component_ids
+            ]
         return [vendor.model_copy(deep=True) for vendor in self._vendors]
 
     def submit_purchase_order(self, order: PurchaseOrder) -> str:
@@ -48,10 +58,18 @@ class MockAribaClient:
         """Return an illustrative shipment notice using the chosen vendor's lead time."""
 
         self._require_submitted(order)
-        vendor = next(
-            (item for item in self._vendors if item.vendor_id == order.vendor_id),
-            None,
-        )
+        vendor = next((item for item in self._vendors if item.vendor_id == order.vendor_id), None)
+        if self._master_data is not None:
+            offer = next(
+                (
+                    item
+                    for item in self._master_data.list("vendors", order.tenant_id)
+                    if item.vendor_id == order.vendor_id
+                ),
+                None,
+            )
+            if offer:
+                vendor = offer.as_vendor(order.quantity)
         if vendor is None:
             raise IntegrationError(
                 "The approved purchase order references an unknown Ariba vendor.",

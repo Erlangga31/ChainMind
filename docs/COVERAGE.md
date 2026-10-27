@@ -43,6 +43,9 @@ Bedrock, Cognito/IAS, Teams/Slack/SES, SAP, atau SAP BTP telah diverifikasi seca
 | 24 — presenter and replay | Implemented (offline demo tooling) | `?presenter=1`, [replay generator](../scripts/generate_replay_fixture.py), [replay fixture](../dashboard/public/replay-run.json), [preflight](../scripts/preflight.py), [3-minute video](./VIDEO_SCRIPT.md). | E2E and generator/preflight unit tests; replay is recorded mock data and read-only. |
 | 25 — proposal fidelity and stage 6 outputs | Implemented (locally checkable claims) | [fidelity tests](../tests/test_proposal_fidelity.py), [numbered audit steps](../src/chainmind/core/models.py), [tracking outputs](../src/chainmind/agents/tracking.py), `/kpis`. | Pipeline/API tests and mocked S3 archive assertions; only LocalStack/synth for AWS, sandbox for SAP. |
 | 26 — real-account readiness | Implemented (documentation/validation) | [GO_LIVE.md](./GO_LIVE.md), [offline config validator](../scripts/validate_config.py), [AWS verifier](../scripts/verify_aws_account.py), [SAP verifier](../scripts/verify_sap_tenant.py). | Validator unit-tested; live checks are opt-in and were not run. |
+| 27 — fixed-viewport dashboard shell | Implemented (local UI) | [App shell](../dashboard/src/App.tsx) has collapsible desktop navigation, mobile tab bar, tenant identity, language/theme/accessibility controls, and a notification shortcut. Page panels own their overflow. | Vitest and Playwright check 1280×720 and 375×667 document heights; no document-level vertical scroll. Theme screenshots cover ID/EN and light/dark. |
+| 28 — tenant-owned data | Implemented (mock/sandbox), live weather not implemented | [Data Studio](../dashboard/src/DataStudio.tsx), [SQLite catalog](../src/chainmind/core/master_data.py), [DynamoDB adapter](../src/chainmind/integrations/aws/master_data.py), tenant-scoped CRUD/import/export, row validation, deterministic generator and user-data pipeline tests. Seeds bootstrap only empty tenants and are marked demo. | Backend and component tests; DynamoDB fake adapter test. No production AWS/SAP; optional live weather polling is not implemented. |
+| 29 — v1.1.0 release materials | Implemented (local artifacts) | Updated bilingual README, [demo](./DEMO.md), [rehearsal](./REHEARSAL.md), [Q&A](./QNA.md), [coverage](./COVERAGE.md), [changelog](../CHANGELOG.md), slides and screenshots. | Deck generation and automated deck checks; no PR/CI result claimed until the release branch is pushed. |
 | Presenter package | Implemented (reproducible) | [Pitch generator](../scripts/build_slides.py), bilingual [PowerPoint decks](./slides/), [jury Q&A](./QNA.md), and [rehearsal checklist](./REHEARSAL.md). | Unit test verifies both decks, 11 slides and speaker notes; no claim of audience/user validation. |
 | 13 — roadmap MVP enam minggu | Partial | Sandbox, API, agents, UI, notifikasi, demo dan testing dijabarkan di [DEMO.md](./DEMO.md). | Implementasi mock lokal terverifikasi; pilot BTP dan runtime layanan nyata belum dikerjakan. |
 | 15 — risiko dan mitigasi | Partial | Risiko salah pilih agen, adopsi, kompleksitas SAP, ketergantungan Bedrock, dan perubahan API dicatat di [BUSINESS.md](./BUSINESS.md). | Documentation-only, cdk-nag synth-only; bukan threat model atau security certification formal. |
@@ -100,12 +103,12 @@ Bedrock, Cognito/IAS, Teams/Slack/SES, SAP, atau SAP BTP telah diverifikasi seca
 
 ## Validasi dan batas deployment
 
-Validasi lokal pada presenter-package update: backend pytest **155 passed, 9 skipped** (opt-in
-LocalStack/live SAP suite tidak dijalankan lokal); dashboard Vitest **15 passed**; Playwright
-**10 passed**, termasuk flow ID/EN, axe, presenter, offline replay dan viewport 375px / 1280px;
-browser-test typecheck dan production build lulus; Ruff lint/format lulus. `npx --yes aws-cdk synth`
-lulus dengan virtualenv Python di PATH. CI status per SHA dicatat di GitHub Actions; semua enam job
-untuk commit `b185ba6` sukses, sebelum perubahan slide ini.
+Validasi lokal setelah perubahan Phase 27–29: backend pytest **163 passed, 9 skipped** (suite
+opt-in LocalStack/live SAP dilewati); dashboard Vitest **18 passed**; Playwright **11 passed**,
+termasuk approve/viewer, scenario, presenter, replay, axe, dan tinggi dokumen pada 375px / 1280px.
+Production build dan browser-test typecheck lulus. Ruff, CDK synth, dan CI untuk perubahan rilis
+harus dicatat dari validasi branch/Actions terbaru sebelum merge; status commit `b185ba6` adalah
+bukti historis untuk versi sebelumnya saja.
 
 CDK synth menargetkan Python 3.12 Linux x86_64 dan memaketkan dependencies. Synthesis tidak
 membuktikan asset dijalankan Lambda. Suppressions cdk-nag yang ada memiliki alasan tertulis; review
