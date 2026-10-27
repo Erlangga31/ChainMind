@@ -9,6 +9,7 @@ import {
   WorkflowTimeline,
 } from "./components";
 import { FlowDiagram } from "./FlowDiagram";
+import { DataStudio } from "./DataStudio";
 import type { ApiError, DisruptionRun, KPIReport, UsageReport } from "./types";
 import { formatNotification, translate, type Language } from "./i18n";
 
@@ -16,40 +17,15 @@ const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 const OIDC_ISSUER = import.meta.env.VITE_OIDC_ISSUER ?? "http://127.0.0.1:8100";
 const OIDC_CLIENT_ID = import.meta.env.VITE_OIDC_CLIENT_ID ?? "chainmind-dashboard";
 const OIDC_REDIRECT_URI = import.meta.env.VITE_OIDC_REDIRECT_URI ?? "http://localhost:5173/";
-const SCENARIOS = [
-  {
-    id: "weather",
-    label: "weather",
-    title: "Extreme weather delays cargo ship",
-    description: "Severe weather delayed the vessel carrying Microchip X by five days.",
-    event_type: "weather",
-    delay_days: 5,
-  },
-  {
-    id: "geopolitical",
-    label: "geopolitical",
-    title: "Geopolitical disruption delays component supply",
-    description: "Regional restrictions delayed the shipment of Microchip X.",
-    event_type: "geopolitical",
-    delay_days: 5,
-  },
-  {
-    id: "vendor_failure",
-    label: "vendorFailure",
-    title: "Primary vendor reports a supply failure",
-    description: "The contracted supplier cannot fulfill the Microchip X shipment.",
-    event_type: "vendor_failure",
-    delay_days: 4,
-  },
-  {
-    id: "port_congestion",
-    label: "portCongestion",
-    title: "Port congestion delays inbound shipment",
-    description: "Port congestion delayed the Microchip X shipment by five days.",
-    event_type: "logistics_delay",
-    delay_days: 5,
-  },
-] as const;
+const DEMO_PRESET = {
+  title: "Extreme weather delays cargo ship",
+  description: "Severe weather delayed the vessel carrying Microchip X by five days.",
+  event_type: "weather",
+  delay_days: 5,
+  component_id: "microchip-x",
+  component_name: "Microchip X",
+  source: "presenter-demo",
+} as const;
 
 type TokenClaims = {
   sub: string;
@@ -63,9 +39,22 @@ type TokenClaims = {
 type AuthSession = {
   token: string;
   subject: string;
+  tenantId: string;
   role: "viewer" | "approver" | "admin";
   expiresAt: number;
 };
+
+type DashboardPage =
+  | "overview"
+  | "runs"
+  | "analysis"
+  | "decision"
+  | "flow"
+  | "tracking"
+  | "notifications"
+  | "kpis"
+  | "usage"
+  | "data";
 
 function LanguageControls({
   language,
@@ -202,7 +191,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (response.status === 401 && accessToken) onSessionExpired?.();
   if (!response.ok) throw await responseError(response);
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
+}
+
+async function requestText(path: string): Promise<string> {
+  const response = await fetch(`${API}${path}`, {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  });
+  if (response.status === 401 && accessToken) onSessionExpired?.();
+  if (!response.ok) throw await responseError(response);
+  return response.text();
 }
 
 function money(value: number, currency = "USD"): string {
@@ -258,16 +257,27 @@ export default function App() {
   const [highContrast, setHighContrast] = useState(
     () => localStorage.getItem("chainmind.highContrast") === "true",
   );
+  const [darkTheme, setDarkTheme] = useState(
+    () => localStorage.getItem("chainmind.theme") === "dark",
+  );
   const [session, setSession] = useState<AuthSession | null>(null);
   const [runs, setRuns] = useState<DisruptionRun[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [run, setRun] = useState<DisruptionRun | null>(null);
   const [decisionNote, setDecisionNote] = useState("");
   const [revisionVendorId, setRevisionVendorId] = useState("");
-  const [scenarioId, setScenarioId] = useState<(typeof SCENARIOS)[number]["id"]>("weather");
+  const [disruptionTitle, setDisruptionTitle] = useState("");
+  const [disruptionDescription, setDisruptionDescription] = useState("");
+  const [materialId, setMaterialId] = useState("");
+  const [materialName, setMaterialName] = useState("");
+  const [delayDays, setDelayDays] = useState("");
+  const [eventType, setEventType] = useState("");
+  const [shipmentId, setShipmentId] = useState("");
+  const [severityHint, setSeverityHint] = useState("");
   const role = session?.role;
   const canApprove = role === "approver" || role === "admin";
-  const [page, setPage] = useState<"runs" | "flow" | "kpis" | "usage">("runs");
+  const [page, setPage] = useState<DashboardPage>("runs");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [apiMode, setApiMode] = useState("mock");
   const [kpis, setKpis] = useState<KPIReport | null>(null);
   const [usage, setUsage] = useState<UsageReport | null>(null);
@@ -295,6 +305,10 @@ export default function App() {
     localStorage.setItem("chainmind.highContrast", String(highContrast));
     document.documentElement.dataset.contrast = highContrast ? "high" : "standard";
   }, [highContrast]);
+  useEffect(() => {
+    localStorage.setItem("chainmind.theme", darkTheme ? "dark" : "light");
+    document.documentElement.dataset.theme = darkTheme ? "dark" : "light";
+  }, [darkTheme]);
 
   onSessionExpired = () => {
     accessToken = null;
@@ -351,6 +365,7 @@ export default function App() {
         const nextSession = {
           token: identityToken,
           subject: claims.sub,
+          tenantId: claims.tenant_id,
           role: roles.includes("admin")
             ? "admin" as const
             : roles.includes("approver")
@@ -479,22 +494,34 @@ export default function App() {
     };
   }, [replayMode, replayProgress, run]);
 
-  async function triggerDemo(scenarioOverride?: string) {
+  async function triggerDemo() {
     setBusy(true);
     setError("");
     try {
-      const scenario = SCENARIOS.find((item) => item.id === (scenarioOverride ?? scenarioId)) ?? SCENARIOS[0];
+      const event = presenter
+        ? DEMO_PRESET
+        : {
+            title: disruptionTitle.trim(),
+            description: disruptionDescription.trim(),
+            event_type: eventType,
+            delay_days: Number(delayDays),
+            component_id: materialId.trim(),
+            component_name: materialName.trim(),
+            source: "dashboard-user",
+          };
       const created = await request<{ run_id: string }>("/disruptions", {
         method: "POST",
         body: JSON.stringify({
-          title: scenario.title,
-          description: scenario.description,
-          event_type: scenario.event_type,
-          delay_days: scenario.delay_days,
+          title: event.title,
+          description: event.description,
+          event_type: event.event_type,
+          delay_days: event.delay_days,
           language,
-          component_id: "microchip-x",
-          component_name: "Microchip X",
-          source: "dashboard-demo",
+          component_id: event.component_id,
+          component_name: event.component_name,
+          source: event.source,
+          ...(!presenter && shipmentId.trim() ? { shipment_id: shipmentId.trim() } : {}),
+          ...(!presenter && severityHint ? { severity_hint: severityHint } : {}),
         }),
       });
       setApiUnavailable(false);
@@ -553,7 +580,7 @@ export default function App() {
     if (!presenter || !session || presenterStarted.current || replayMode) return;
     presenterStarted.current = true;
     setPage("flow");
-    void triggerDemo("weather");
+    void triggerDemo();
   }, [presenter, replayMode, session]);
 
   useEffect(() => {
@@ -653,6 +680,23 @@ export default function App() {
     setError("");
   }
 
+  const navigationItems: { page: DashboardPage; icon: string; label: string }[] = [
+    { page: "overview", icon: "⌂", label: language === "id" ? "Ringkasan" : "Overview" },
+    { page: "runs", icon: "!", label: t("disruptions") },
+    { page: "analysis", icon: "▤", label: language === "id" ? "Analisis" : "Analysis" },
+    { page: "decision", icon: "✓", label: language === "id" ? "Keputusan" : "Decision" },
+    { page: "flow", icon: "◇", label: t("flowTitle") },
+    { page: "tracking", icon: "↗", label: language === "id" ? "Pelacakan" : "Tracking" },
+    { page: "notifications", icon: "♧", label: language === "id" ? "Audit & Notifikasi" : "Audit & Notifications" },
+    { page: "kpis", icon: "%", label: t("kpis") },
+    ...(!replayMode && canApprove && !presenter
+      ? [
+          { page: "usage" as const, icon: "◷", label: t("usagePlan") },
+          { page: "data" as const, icon: "▦", label: "Data Studio" },
+        ]
+      : []),
+  ];
+
   if (!session) {
     return (
       <main className="grid min-h-screen place-items-center bg-canvas p-6">
@@ -690,7 +734,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-canvas">
+    <div className="flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-canvas">
       <header className="bg-ink text-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between lg:px-8">
           <div className="flex items-center gap-3">
@@ -701,8 +745,19 @@ export default function App() {
             </div>
           </div>
           <div className="flex min-w-0 flex-wrap items-center justify-center gap-2 sm:justify-end">
-            <span className="text-xs text-slate-300">{session.subject} · {role}</span>
+            <span className="text-xs text-slate-300">{session.tenantId} · {session.subject} · {role}</span>
             <LanguageControls language={language} onChange={setLanguage} />
+            <button
+              type="button"
+              aria-label={`${language === "id" ? "Notifikasi" : "Notifications"}${pendingNotifications.length > 0 ? ` ${pendingNotifications.length}` : ""}`}
+              className="rounded-lg border border-slate-500 px-3 py-1 text-xs text-white"
+              onClick={() => setPage("notifications")}
+            >
+              <span aria-hidden="true">🔔</span>{pendingNotifications.length > 0 && <span className="ml-1">{pendingNotifications.length}</span>}
+            </button>
+            <button type="button" className="rounded-lg border border-slate-500 px-3 py-1 text-xs text-white" aria-label={language === "id" ? "Ganti tema" : "Toggle theme"} onClick={() => setDarkTheme((value) => !value)}>
+              {darkTheme ? "☀" : "☾"}
+            </button>
             <AccessibilityControls
               largeText={largeText}
               highContrast={highContrast}
@@ -718,35 +773,79 @@ export default function App() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl space-y-6 px-5 py-8 lg:px-8">
-        <section className="flex flex-col justify-between gap-5 rounded-3xl bg-white p-6 shadow-card md:flex-row md:items-center md:p-8">
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <aside className={`order-2 flex h-16 shrink-0 border-t border-slate-200 bg-white md:order-1 md:h-auto md:flex-col md:border-r md:border-t-0 ${sidebarCollapsed ? "md:w-16" : "md:w-56"}`}>
+          <div className="hidden shrink-0 justify-end p-2 md:flex">
+            <button
+              type="button"
+              aria-label={sidebarCollapsed ? (language === "id" ? "Perluas navigasi" : "Expand navigation") : (language === "id" ? "Ciutkan navigasi" : "Collapse navigation")}
+              className="rounded-lg border border-slate-300 px-2 py-1 text-xs"
+              onClick={() => setSidebarCollapsed((value) => !value)}
+            >
+              <span aria-hidden="true">{sidebarCollapsed ? "»" : "«"}</span>
+            </button>
+          </div>
+          <nav className="flex min-w-0 flex-1 items-stretch gap-1 overflow-x-auto px-2 py-2 md:flex-col md:overflow-x-hidden md:overflow-y-auto" aria-label={t("dashboardSections")}>
+            {navigationItems.map(({ page: target, icon, label }) => (
+              <button
+                key={target}
+                type="button"
+                aria-label={label}
+                aria-current={page === target ? "page" : undefined}
+                title={label}
+                className={`flex min-w-max items-center justify-center gap-3 rounded-xl px-3 py-2 text-sm font-semibold transition-colors md:justify-start ${page === target ? "bg-ink text-white" : "text-ink hover:bg-slate-100"}`}
+                onClick={() => setPage(target)}
+              >
+                <span aria-hidden="true" className="w-5 text-center text-base">{icon}</span>
+                <span className={sidebarCollapsed ? "md:hidden" : ""}>{label}</span>
+              </button>
+            ))}
+          </nav>
+        </aside>
+
+        <main className="order-1 mx-auto flex w-full max-w-[1600px] min-h-0 flex-1 flex-col gap-3 overflow-hidden px-3 py-3 md:order-2 lg:px-6">
+        <section className="flex shrink-0 flex-col justify-between gap-3 rounded-2xl bg-white p-4 shadow-card md:flex-row md:items-center">
           <div>
             <p className="text-sm font-semibold uppercase tracking-widest text-accent">{t("controlTower")}</p>
-            <h1 className="mt-2 text-3xl font-bold text-ink">{t("responseTitle")}</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+            <h1 className="mt-1 text-2xl font-bold text-ink">{t("responseTitle")}</h1>
+            <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-600">
               {t("responseDescription")}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="text-sm font-medium text-slate-700">
-              {t("scenario")}
-              <select
-                aria-label="Disruption scenario"
-                className="ml-2 rounded-lg border border-slate-300 px-3 py-2"
-                value={scenarioId}
-                onChange={(event) => setScenarioId(event.target.value as typeof scenarioId)}
-              >
-                {SCENARIOS.map((scenario) => <option key={scenario.id} value={scenario.id}>{t(scenario.label)}</option>)}
-              </select>
-            </label>
-            {!replayMode && <button
-              className="rounded-xl bg-accent px-5 py-3 font-semibold text-white shadow-sm transition-colors hover:bg-teal-800 disabled:cursor-wait disabled:opacity-60"
-              disabled={busy || replayMode}
+          {!presenter && !replayMode && <details className="min-w-0">
+            <summary className="cursor-pointer rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold">
+              {language === "id" ? "Gangguan baru" : "New disruption"}
+            </summary>
+            <div className="mt-2 grid max-h-[45dvh] min-w-0 gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
+            <input aria-label={language === "id" ? "Judul gangguan" : "Disruption title"} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder={language === "id" ? "Judul gangguan" : "Disruption title"} value={disruptionTitle} onChange={(event) => setDisruptionTitle(event.target.value)} />
+            <input aria-label={language === "id" ? "Deskripsi gangguan" : "Disruption description"} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder={language === "id" ? "Deskripsi gangguan" : "Disruption description"} value={disruptionDescription} onChange={(event) => setDisruptionDescription(event.target.value)} />
+            <input aria-label="Material ID" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Material ID" value={materialId} onChange={(event) => setMaterialId(event.target.value)} />
+            <input aria-label={language === "id" ? "Nama material" : "Material name"} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder={language === "id" ? "Nama material" : "Material name"} value={materialName} onChange={(event) => setMaterialName(event.target.value)} />
+            <input aria-label={language === "id" ? "Hari keterlambatan" : "Delay days"} type="number" min="0.1" max="365" step="0.1" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder={language === "id" ? "Hari keterlambatan" : "Delay days"} value={delayDays} onChange={(event) => setDelayDays(event.target.value)} />
+            <input aria-label={language === "id" ? "ID pengiriman (opsional)" : "Shipment ID (optional)"} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder={language === "id" ? "ID pengiriman (opsional)" : "Shipment ID (optional)"} value={shipmentId} onChange={(event) => setShipmentId(event.target.value)} />
+            <select aria-label={language === "id" ? "Jenis gangguan" : "Event type"} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" value={eventType} onChange={(event) => setEventType(event.target.value)}>
+              <option value="">{language === "id" ? "Pilih jenis gangguan" : "Select event type"}</option>
+              <option value="weather">{language === "id" ? "Cuaca" : "Weather"}</option>
+              <option value="logistics_delay">{language === "id" ? "Logistik" : "Logistics"}</option>
+              <option value="geopolitical">{language === "id" ? "Geopolitik" : "Geopolitical"}</option>
+              <option value="vendor_failure">{language === "id" ? "Kegagalan vendor" : "Vendor failure"}</option>
+            </select>
+            <select aria-label={language === "id" ? "Petunjuk tingkat keparahan" : "Severity hint"} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" value={severityHint} onChange={(event) => setSeverityHint(event.target.value)}>
+              <option value="">{language === "id" ? "Petunjuk severity (opsional)" : "Severity hint (optional)"}</option>
+              <option value="Low">{language === "id" ? "Rendah" : "Low"}</option>
+              <option value="Medium">{language === "id" ? "Sedang" : "Medium"}</option>
+              <option value="High">{language === "id" ? "Tinggi" : "High"}</option>
+              <option value="Critical">{language === "id" ? "Kritis" : "Critical"}</option>
+            </select>
+            <button
+              className="rounded-xl bg-accent px-5 py-3 font-semibold text-white shadow-sm transition-colors hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-60 sm:col-span-2 lg:col-span-3"
+              disabled={busy || !disruptionTitle.trim() || !disruptionDescription.trim() || !materialId.trim() || !materialName.trim() || !eventType || !Number(delayDays)}
               onClick={() => void triggerDemo()}
             >
-              {busy ? t("working") : t("trigger")}
-            </button>}
-          </div>
+              {busy ? t("working") : language === "id" ? "Analisis gangguan" : "Analyze disruption"}
+            </button>
+            </div>
+          </details>}
         </section>
 
         {error && (
@@ -785,69 +884,51 @@ export default function App() {
           </section>
         )}
 
-        <section aria-label={t("notificationFeed")} className="rounded-2xl bg-white p-5 shadow-card">
-          <h2 className="text-lg font-bold text-ink">{t("notificationFeed")}</h2>
-          {pendingNotifications.length === 0 ? (
-            <p className="mt-2 text-sm text-slate-500">{t("noNotifications")}</p>
-          ) : (
-            <ul className="mt-3 space-y-3">
-              {pendingNotifications.map((item) => {
-                const inventory = item.inventory_snapshot;
-                const coverageDays = inventory
-                  ? inventory.current_stock / inventory.daily_consumption
-                  : 0;
-                return (
-                  <li key={item.run_id} className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-200 p-4">
-                    <p className="min-w-60 flex-1 text-sm leading-6 text-slate-700">
-                      {formatNotification(
-                        language,
-                        item.inventory_snapshot?.component_name ?? item.event.component_name,
-                        item.event.delay_days,
-                        coverageDays,
-                        item.draft_po?.vendor_name ?? "—",
-                        money(item.draft_po?.total_price ?? 0),
-                      )}
-                    </p>
-                    <div className="flex gap-2">
-                      <button
-                        className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-                        disabled={busy || !canApprove || replayMode}
-                        onClick={() => void openNotificationApproval(item.run_id)}
-                      >
-                        {t("approve")}
-                      </button>
-                      <button
-                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
-                        onClick={() => void selectRun(item.run_id)}
-                      >
-                        {t("viewDetails")}
-                      </button>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-
-        <nav className="flex flex-wrap gap-2" aria-label={t("dashboardSections")}>
-          <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "runs" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("runs")}>{t("disruptions")}</button>
-          <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "flow" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("flow")}>{t("flowTitle")}</button>
-          {!replayMode && <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "kpis" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("kpis")}>{t("kpis")}</button>}
-          {canApprove && !presenter && !replayMode && (
-            <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${page === "usage" ? "bg-ink text-white" : "bg-white text-ink"}`} onClick={() => setPage("usage")}>{t("usagePlan")}</button>
-          )}
-        </nav>
-
-        {page === "flow" ? (
-          replayRun ? <FlowDiagram run={replayRun} language={language} /> : <div className="rounded-xl bg-white p-6 text-slate-500">{t("selectRunForFlow")}</div>
+        <section className="min-h-0 flex-1 overflow-hidden">
+        {page === "notifications" ? (
+          <section aria-label={t("notificationFeed")} className="h-full overflow-auto rounded-2xl bg-white p-5 shadow-card">
+            <h2 className="text-lg font-bold text-ink">{t("notificationFeed")} · {language === "id" ? "Audit" : "Audit"}</h2>
+            {pendingNotifications.length === 0 ? <p className="mt-2 text-sm text-slate-500">{t("noNotifications")}</p> : (
+              <ul className="mt-3 space-y-3">{pendingNotifications.map((item) => (
+                <li key={item.run_id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-4">
+                  <p className="min-w-60 flex-1 text-sm">{formatNotification(language, item.inventory_snapshot?.component_name ?? item.event.component_name, item.event.delay_days, item.inventory_snapshot ? item.inventory_snapshot.current_stock / item.inventory_snapshot.daily_consumption : 0, item.draft_po?.vendor_name ?? "—", money(item.draft_po?.total_price ?? 0))}</p>
+                  <div className="flex gap-2">
+                    <button className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={busy || !canApprove || replayMode} onClick={() => void openNotificationApproval(item.run_id)}>{t("approve")}</button>
+                    <button className="rounded-lg border px-3 py-2 text-sm" onClick={() => void selectRun(item.run_id)}>{t("viewDetails")}</button>
+                  </div>
+                </li>
+              ))}</ul>
+            )}
+            {run && <div className="mt-4"><AuditViewer run={run} language={language} /></div>}
+          </section>
+        ) : page === "data" && canApprove ? (
+          <DataStudio request={request} requestText={requestText} language={language} />
+        ) : page === "overview" ? (
+          <div className="grid h-full min-h-0 gap-3 overflow-auto lg:grid-cols-3">
+            <section className="rounded-2xl bg-white p-4 shadow-card">
+              <h2 className="font-bold text-ink">{language === "id" ? "Run tersimpan" : "Stored runs"}</h2>
+              <p className="mt-3 text-3xl font-bold text-accent">{runs.length}</p>
+              <p className="text-xs text-slate-500">{language === "id" ? "Sumber: jumlah run tenant" : "Source: tenant run count"}</p>
+            </section>
+            <section className="rounded-2xl bg-white p-4 shadow-card">
+              <h2 className="font-bold text-ink">{language === "id" ? "Gangguan aktif" : "Active disruption"}</h2>
+              <p className="mt-3 truncate text-lg font-semibold">{run?.event.title ?? (language === "id" ? "Belum ada run" : "No runs yet")}</p>
+              <p className="text-xs text-slate-500">{language === "id" ? "Sumber: run terpilih" : "Source: selected run"}</p>
+            </section>
+            <section className="min-h-0 overflow-auto rounded-2xl bg-white p-4 shadow-card">
+              <h2 className="font-bold text-ink">{language === "id" ? "Run terbaru" : "Recent runs"}</h2>
+              <ul className="mt-2 space-y-2">{runs.slice(0, 5).map((item) => <li key={item.run_id} className="flex justify-between gap-2 border-b py-2 text-sm"><span className="truncate">{item.event.title}</span><StatusPill status={item.status} /></li>)}</ul>
+            </section>
+          </div>
+        ) : page === "flow" ? (
+          replayRun ? <div tabIndex={0} className="h-full overflow-auto rounded-2xl"><FlowDiagram run={replayRun} language={language} /></div> : <div className="rounded-xl bg-white p-6 text-slate-500">{t("selectRunForFlow")}</div>
         ) : page === "kpis" ? (
-          kpis ? <KpiCards report={kpis} language={language} /> : <div className="rounded-xl bg-white p-6 text-slate-500">{language === "id" ? "Memuat data KPI…" : "Loading KPI data…"}</div>
+          kpis ? <div className="h-full overflow-auto"><KpiCards report={kpis} language={language} /></div> : <div className="rounded-xl bg-white p-6 text-slate-500">{language === "id" ? "Memuat data KPI…" : "Loading KPI data…"}</div>
         ) : page === "usage" ? (
-          usage ? <UsageCard report={usage} language={language} /> : <div className="rounded-xl bg-white p-6 text-slate-500">{language === "id" ? "Memuat data penggunaan…" : "Loading usage data…"}</div>
+          usage ? <div className="h-full overflow-auto"><UsageCard report={usage} language={language} /></div> : <div className="rounded-xl bg-white p-6 text-slate-500">{language === "id" ? "Memuat data penggunaan…" : "Loading usage data…"}</div>
         ) : (
-        <div className="grid min-w-0 gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
-          <aside className="h-fit rounded-2xl bg-white p-4 shadow-card">
+        <div className="grid h-full min-h-0 min-w-0 gap-3 overflow-hidden lg:grid-cols-[240px_minmax(0,1fr)]">
+          <aside className="min-h-0 overflow-auto rounded-2xl bg-white p-3 shadow-card">
             <div className="mb-3 flex items-center justify-between px-2">
               <h2 className="font-bold text-ink">{t("disruptionRuns")}</h2>
               <button className="text-xs font-semibold text-accent hover:underline disabled:opacity-50" disabled={replayMode} onClick={() => void refreshRuns()}>{t("refresh")}</button>
@@ -873,8 +954,34 @@ export default function App() {
           </aside>
 
           {run ? (
-            <div className="min-w-0 space-y-6">
-              <section className="rounded-2xl bg-white p-5 shadow-card md:p-6">
+            <div className="min-w-0 space-y-3 overflow-auto">
+              <section aria-label={t("notificationFeed")} className="rounded-2xl bg-white p-3 shadow-card">
+                <h2 className="font-bold text-ink">{t("notificationFeed")}</h2>
+                {pendingNotifications.length === 0 ? <p className="mt-1 text-xs text-slate-500">{t("noNotifications")}</p> : (
+                  <ul className="mt-2 space-y-2">{pendingNotifications.map((item) => (
+                    <li key={item.run_id} className="flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-sm">
+                      <p className="min-w-60 flex-1 text-sm leading-5 text-slate-700">
+                        {formatNotification(
+                          language,
+                          item.inventory_snapshot?.component_name ?? item.event.component_name,
+                          item.event.delay_days,
+                          item.inventory_snapshot
+                            ? item.inventory_snapshot.current_stock /
+                              item.inventory_snapshot.daily_consumption
+                            : 0,
+                          item.draft_po?.vendor_name ?? "—",
+                          money(item.draft_po?.total_price ?? 0),
+                        )}
+                      </p>
+                      <div className="flex gap-2">
+                        <button className="rounded-lg bg-accent px-3 py-1 text-xs font-semibold text-white" disabled={!canApprove || replayMode} onClick={() => void openNotificationApproval(item.run_id)}>{t("approve")}</button>
+                        <button className="rounded-lg border px-3 py-1 text-xs" onClick={() => void selectRun(item.run_id)}>{t("viewDetails")}</button>
+                      </div>
+                    </li>
+                  ))}</ul>
+                )}
+              </section>
+              {(page === "runs" || page === "analysis") && <section className="rounded-2xl bg-white p-5 shadow-card md:p-6">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="text-sm text-slate-500">{t("activeEvent")} · {run.inventory_snapshot?.component_name ?? run.event.component_name}</p>
@@ -884,17 +991,17 @@ export default function App() {
                   <StatusPill status={run.status} />
                 </div>
                 <div className="mt-6"><WorkflowTimeline run={run} language={language} /></div>
-              </section>
+              </section>}
 
-              <ImpactPanel run={run} language={language} />
-              <VendorCharts
+              {(page === "runs" || page === "analysis") && <ImpactPanel run={run} language={language} />}
+              {(page === "runs" || page === "analysis") && <VendorCharts
                 evaluations={run.vendor_comparison}
                 selectedVendorId={run.selected_vendor_id}
                 costOfInaction={run.cost_of_inaction}
                 language={language}
-              />
+              />}
 
-              {run.execution_tracking && (
+              {run.execution_tracking && (page === "runs" || page === "tracking") && (
                 <section className="rounded-2xl bg-white p-5 shadow-card md:p-6">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
@@ -931,12 +1038,12 @@ export default function App() {
                 </section>
               )}
 
-              <section className="rounded-2xl bg-white p-5 shadow-card md:p-6">
+              {(page === "runs" || page === "analysis") && <section className="rounded-2xl bg-white p-5 shadow-card md:p-6">
                 <div className="mb-4 flex items-end justify-between gap-3">
                 <div><p className="text-sm text-slate-500">{t("aribaNetwork")}</p><h2 className="text-lg font-bold text-ink">{t("vendorComparison")}</h2></div>
                 <span className="text-xs text-slate-500">{feasibleVendors.length} {t("feasible")}</span>
                 </div>
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto" tabIndex={0} role="region" aria-label={t("vendorComparison")}>
                   <table className="w-full min-w-[700px] text-left text-sm">
                     <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
                       <tr><th className="px-3 py-3">{t("vendor")}</th><th className="px-3 py-3">{t("regionDistance")}</th><th className="px-3 py-3">{t("lead")}</th><th className="px-3 py-3">{t("capacity")}</th><th className="px-3 py-3">{t("quote")}</th><th className="px-3 py-3">{t("riskScore")}</th><th className="px-3 py-3">{t("residualLoss")}</th><th className="px-3 py-3">{t("economicTotal")}</th><th className="px-3 py-3">{t("status")}</th></tr>
@@ -958,9 +1065,9 @@ export default function App() {
                     </tbody>
                   </table>
                 </div>
-              </section>
+              </section>}
 
-              <div className="grid gap-6 xl:grid-cols-2">
+              {(page === "runs" || page === "decision") && <div className="grid gap-6 xl:grid-cols-2">
                 <AgentReasoning run={run} language={language} />
 
                 <section className="rounded-2xl bg-white p-5 shadow-card md:p-6">
@@ -1005,8 +1112,8 @@ export default function App() {
                     </>
                   ) : <p className="mt-4 text-sm text-slate-500">{t("noPurchaseOrder")}</p>}
                 </section>
-              </div>
-              <AuditViewer run={run} language={language} />
+              </div>}
+              {page === "runs" && <AuditViewer run={run} language={language} />}
             </div>
           ) : (
             <section className="grid min-h-64 place-items-center rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
@@ -1015,7 +1122,9 @@ export default function App() {
           )}
         </div>
         )}
-      </main>
+        </section>
+        </main>
+      </div>
       {pendingDecision && (
         <div className="fixed inset-0 z-20 grid place-items-center bg-ink/60 p-4" role="presentation">
           <section role="dialog" aria-modal="true" aria-labelledby="decision-title" className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">

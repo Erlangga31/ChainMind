@@ -92,7 +92,10 @@ class DisruptionPipeline:
             component_ids = list(dict.fromkeys([event.component_id, *event.affected_component_ids]))
             inventories = [
                 retry_integration_call(
-                    lambda component_id=component_id: self._sap.get_inventory(component_id),
+                    lambda component_id=component_id: self._sap.get_inventory(
+                        component_id,
+                        tenant_id=event.tenant_id,
+                    ),
                     attempts=self._settings.retry_attempts,
                     base_delay_seconds=self._settings.retry_base_delay_seconds,
                 )
@@ -459,7 +462,10 @@ class DisruptionPipeline:
                 context[0]
                 if context is not None
                 else retry_integration_call(
-                    lambda: self._sap.get_inventory(run.event.component_id),
+                    lambda: self._sap.get_inventory(
+                        run.event.component_id,
+                        tenant_id=run.event.tenant_id,
+                    ),
                     attempts=self._settings.retry_attempts,
                     base_delay_seconds=self._settings.retry_base_delay_seconds,
                 )

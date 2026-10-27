@@ -4,10 +4,10 @@ import json
 import logging
 from collections import Counter
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, Request
+from fastapi import Depends, FastAPI, Header, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,6 +21,17 @@ from chainmind.api.identity import (
 )
 from chainmind.core.config import get_settings
 from chainmind.core.errors import ChainMindError
+from chainmind.core.master_data import (
+    DisruptionRecord,
+    EntityModel,
+    EntityName,
+    GeneratedDataset,
+    ImportReport,
+    MaterialRecord,
+    ShipmentRecord,
+    SQLiteMasterDataStore,
+    VendorOffer,
+)
 from chainmind.core.models import (
     AuditEntry,
     DecisionRequest,
@@ -40,12 +51,23 @@ from chainmind.core.usage import calculate_usage
 from chainmind.factory import create_pipeline
 from chainmind.integrations.aws.approval import StepFunctionsApprovalClient
 from chainmind.integrations.aws.event_publisher import EventBridgePublisher
+from chainmind.integrations.aws.master_data import DynamoDBMasterDataStore
 from chainmind.integrations.external.signing import parse_signed_event
 from chainmind.workflow.definition import WorkflowState
 
 logger = logging.getLogger("chainmind.api")
 settings = get_settings()
-pipeline = create_pipeline(settings)
+master_data_store = (
+    DynamoDBMasterDataStore(settings.event_table_name, settings.aws_region)
+    if settings.mode == "aws"
+    else SQLiteMasterDataStore(settings.event_database_path)
+)
+pipeline = create_pipeline(
+    settings,
+    master_data_store=(
+        master_data_store if isinstance(master_data_store, SQLiteMasterDataStore) else None
+    ),
+)
 app = FastAPI(
     title="ChainMind – Autonomous Disruption Resolver",
     version="0.1.0",
@@ -55,7 +77,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.api_cors_origins,
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=[
         "Content-Type",
         "Authorization",
@@ -141,6 +163,236 @@ def health() -> dict[str, str]:
     return {"status": "ok", "mode": settings.mode}
 
 
+def _entity_model(entity: EntityName) -> type[EntityModel]:
+    return {
+        "materials": MaterialRecord,
+        "vendors": VendorOffer,
+        "shipments": ShipmentRecord,
+        "events": DisruptionRecord,
+    }[entity]
+
+
+@app.get("/data/audit")
+def list_master_data_audit(
+    user: Annotated[AuthenticatedUser, Depends(require_approver)],
+) -> list[dict[str, object]]:
+    """List master-data changes for the authenticated tenant."""
+
+    return master_data_store.list_audit(user.tenant_id)
+
+
+@app.get("/data/{entity}")
+def list_master_data(
+    entity: EntityName,
+    user: Annotated[AuthenticatedUser, Depends(require_approver)],
+) -> list[EntityModel]:
+    """List tenant-owned materials, offers, shipments, or saved events."""
+
+    return master_data_store.list(entity, user.tenant_id)
+
+
+@app.post("/data/{entity}", status_code=201)
+def create_master_record(
+    entity: EntityName,
+    payload: dict[str, object],
+    user: Annotated[AuthenticatedUser, Depends(require_approver)],
+) -> EntityModel:
+    """Validate and create one tenant-owned master record."""
+
+    model = _entity_model(entity)
+    record = model.model_validate(payload)
+    if entity == "events":
+        record = record.model_copy(update={"tenant_id": user.tenant_id})
+    saved = master_data_store.put(entity, user.tenant_id, record)
+    record_id = str(getattr(saved, _record_key(entity)))
+    master_data_store.record_audit(user.tenant_id, user.subject, "create", entity, record_id)
+    return saved
+
+
+def _record_key(entity: EntityName) -> str:
+    return {
+        "materials": "component_id",
+        "vendors": "vendor_id",
+        "shipments": "shipment_id",
+        "events": "event_id",
+    }[entity]
+
+
+@app.put("/data/{entity}/{record_id}")
+def update_master_record(
+    entity: EntityName,
+    record_id: str,
+    payload: dict[str, object],
+    user: Annotated[AuthenticatedUser, Depends(require_approver)],
+) -> EntityModel:
+    """Replace a tenant-owned record while enforcing its path identifier."""
+
+    model = _entity_model(entity)
+    record = model.model_validate(payload)
+    key_name = _record_key(entity)
+    if str(getattr(record, key_name)) != record_id:
+        raise ChainMindError(
+            "record_id_mismatch",
+            "The path identifier must match the record identifier.",
+            status_code=422,
+        )
+    if entity == "events":
+        record = record.model_copy(update={"tenant_id": user.tenant_id})
+    saved = master_data_store.put(entity, user.tenant_id, record)
+    master_data_store.record_audit(user.tenant_id, user.subject, "update", entity, record_id)
+    return saved
+
+
+@app.delete("/data/{entity}/{record_id}", status_code=204)
+def delete_master_record(
+    entity: EntityName,
+    record_id: str,
+    user: Annotated[AuthenticatedUser, Depends(require_approver)],
+) -> Response:
+    """Delete one record only from the authenticated tenant's catalog."""
+
+    if not master_data_store.delete(entity, user.tenant_id, record_id):
+        raise ChainMindError(
+            "record_not_found",
+            "No catalog record exists with that ID.",
+            status_code=404,
+        )
+    master_data_store.record_audit(user.tenant_id, user.subject, "delete", entity, record_id)
+    return Response(status_code=204)
+
+
+@app.post("/data/{entity}/import", response_model=ImportReport)
+def import_master_data(
+    entity: EntityName,
+    payload: dict[str, str],
+    user: Annotated[AuthenticatedUser, Depends(require_approver)],
+) -> ImportReport:
+    """Import JSON or CSV records, returning a per-row validation report."""
+
+    file_format = payload.get("format")
+    content = payload.get("content")
+    if file_format not in {"csv", "json"} or content is None:
+        raise ChainMindError(
+            "invalid_import",
+            "Import requires format='csv' or 'json' and text content.",
+            status_code=422,
+        )
+    report = master_data_store.import_records(
+        entity,
+        user.tenant_id,
+        content,
+        file_format,
+    )
+    master_data_store.record_audit(
+        user.tenant_id,
+        user.subject,
+        "import",
+        entity,
+        str(report.imported),
+    )
+    return report
+
+
+@app.get("/data/{entity}/export")
+def export_master_data(
+    entity: EntityName,
+    user: Annotated[AuthenticatedUser, Depends(require_approver)],
+    file_format: Literal["csv", "json"] = Query(default="json", alias="format"),
+) -> Response:
+    """Download only the authenticated tenant's current records."""
+
+    content = master_data_store.export_records(entity, user.tenant_id, file_format)
+    media_type = "text/csv" if file_format == "csv" else "application/json"
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{entity}.{file_format}"'},
+    )
+
+
+@app.get("/data/{entity}/template")
+def master_data_template(
+    entity: EntityName,
+    user: Annotated[AuthenticatedUser, Depends(require_approver)],
+    file_format: Literal["csv", "json"] = Query(default="json", alias="format"),
+) -> Response:
+    """Return a blank, downloadable template based on the validated model."""
+
+    del user
+    model = _entity_model(entity)
+    template = {name: None for name in model.model_fields}
+    template["data_origin"] = "user"
+    content = json.dumps([template], ensure_ascii=False, indent=2)
+    if file_format == "csv":
+        import csv
+        import io
+
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=list(template))
+        writer.writeheader()
+        writer.writerow(template)
+        content = output.getvalue()
+    return Response(
+        content=content,
+        media_type="text/csv" if file_format == "csv" else "application/json",
+        headers={"Content-Disposition": f'attachment; filename="{entity}-template.{file_format}"'},
+    )
+
+
+@app.post("/data/actions/reset-demo")
+def reset_demo_data(
+    user: Annotated[AuthenticatedUser, Depends(require_approver)],
+) -> dict[str, str]:
+    """Replace the tenant catalog with the deterministic demo fixture."""
+
+    master_data_store.reset_demo_data(user.tenant_id)
+    master_data_store.record_audit(
+        user.tenant_id,
+        user.subject,
+        "reset_demo",
+        "all",
+        "demo",
+    )
+    return {"status": "reset", "tenant_id": user.tenant_id}
+
+
+@app.delete("/data")
+def clear_master_data(
+    user: Annotated[AuthenticatedUser, Depends(require_approver)],
+) -> Response:
+    """Clear only the current tenant's master data without re-seeding it."""
+
+    master_data_store.clear(user.tenant_id)
+    master_data_store.record_audit(user.tenant_id, user.subject, "clear", "all", "all")
+    return Response(status_code=204)
+
+
+@app.post("/data/actions/generate", response_model=GeneratedDataset)
+def generate_master_data(
+    payload: dict[str, int],
+    user: Annotated[AuthenticatedUser, Depends(require_approver)],
+) -> GeneratedDataset:
+    """Generate a deterministic sample catalog using the caller-provided seed."""
+
+    seed = payload.get("seed")
+    size = payload.get("size", 3)
+    if seed is None or size < 1 or size > 20:
+        raise ChainMindError(
+            "invalid_dataset_request",
+            "Provide an integer seed and a size from 1 to 20.",
+            status_code=422,
+        )
+    generated = master_data_store.generate_dataset(user.tenant_id, seed, size)
+    master_data_store.record_audit(
+        user.tenant_id,
+        user.subject,
+        "generate",
+        "dataset",
+        str(seed),
+    )
+    return generated
+
+
 @app.post("/disruptions", response_model=RunCreatedResponse, status_code=201)
 def ingest_disruption(
     event: DisruptionEvent,
@@ -152,6 +404,36 @@ def ingest_disruption(
     if idempotency_key:
         event.idempotency_key = idempotency_key
     event.tenant_id = user.tenant_id
+    if event.shipment_id:
+        shipment = master_data_store.get("shipments", user.tenant_id, event.shipment_id)
+        if not isinstance(shipment, ShipmentRecord):
+            raise ChainMindError(
+                "shipment_not_found",
+                "The selected shipment does not exist in this tenant.",
+                status_code=422,
+            )
+        material = master_data_store.get("materials", user.tenant_id, shipment.component_id)
+        if not isinstance(material, MaterialRecord):
+            raise ChainMindError(
+                "material_not_found",
+                "The selected shipment has no material record in this tenant.",
+                status_code=422,
+            )
+        event.component_id = material.component_id
+        event.component_name = material.component_name
+    master_data_store.bootstrap_demo_data(user.tenant_id)
+    master_data_store.put(
+        "events",
+        user.tenant_id,
+        DisruptionRecord.model_validate({**event.model_dump(mode="json"), "data_origin": "user"}),
+    )
+    master_data_store.record_audit(
+        user.tenant_id,
+        user.subject,
+        "create",
+        "events",
+        str(event.event_id),
+    )
     if settings.mode == "aws":
         try:
             canonical_event_id, _ = EventBridgePublisher(

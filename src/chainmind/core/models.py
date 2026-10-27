@@ -67,6 +67,8 @@ class DisruptionEvent(DomainModel):
     component_name: str = Field(default="Microchip X", min_length=1, max_length=160)
     delay_days: float = Field(gt=0, le=365)
     event_type: DisruptionType | None = None
+    severity_hint: Severity | None = None
+    shipment_id: str | None = Field(default=None, max_length=100)
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
     affected_component_ids: list[str] = Field(default_factory=list)
     language: Literal["id", "en"] = "id"
@@ -92,6 +94,7 @@ class AffectedSupplyChainRecords(DomainModel):
 class InventorySnapshot(DomainModel):
     """SAP inventory and production economics for one component."""
 
+    tenant_id: str = "demo"
     component_id: str
     component_name: str
     current_stock: int = Field(ge=0)
@@ -117,6 +120,7 @@ class Vendor(DomainModel):
     freight_cost: float = Field(default=0, ge=0)
     region: str = "Unknown"
     distance_km: float = Field(default=0, ge=0)
+    terms: str | None = None
 
 
 class VendorEvaluation(DomainModel):
@@ -228,6 +232,7 @@ class StageResult(DomainModel):
 class PurchaseOrder(DomainModel):
     """Draft or human-approved SAP purchase order."""
 
+    tenant_id: str = "demo"
     po_id: UUID = Field(default_factory=uuid4)
     sap_reference: str | None = None
     vendor_id: str

@@ -95,6 +95,7 @@ class OrchestratorAgent:
         quantity = inventory.purchase_quantity
         unit_price = selected.action_cost / quantity
         return PurchaseOrder(
+            tenant_id=inventory.tenant_id,
             vendor_id=selected.vendor.vendor_id,
             vendor_name=selected.vendor.vendor_name,
             component_id=inventory.component_id,
@@ -103,6 +104,6 @@ class OrchestratorAgent:
             unit_price=unit_price,
             total_price=unit_price * quantity,
             currency=inventory.currency,
-            terms=inventory.purchase_terms,
+            terms=selected.vendor.terms or inventory.purchase_terms,
             expected_date=date.today() + timedelta(days=selected.vendor.lead_time_days),
         )

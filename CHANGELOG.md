@@ -2,6 +2,20 @@
 
 Notable user-facing changes are recorded here. This project follows semantic versioning.
 
+## [1.1.0] - 2026-10-24
+
+### Added
+
+- Viewport-fitted dashboard shell with collapsible desktop navigation and mobile tab bar.
+- Tenant-scoped Data Studio for materials, vendors, shipments and disruption records, including CRUD, import/export, templates and row-level validation feedback.
+- Persistent SQLite mock catalog, DynamoDB adapter, one-time demo bootstrap, clear/reset actions and deterministic sample-data generation.
+- Custom-data pipeline coverage and bilingual dashboard screenshots for light/dark themes and desktop/mobile viewports.
+
+### Verification boundaries
+
+- User data is stored in the local mock catalog; AWS and SAP remain simulated and no live weather polling is enabled.
+- The deterministic demo preset remains available for presenter mode.
+
 ## [1.0.0] - 2026-10-24
 
 ### Added

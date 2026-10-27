@@ -1,6 +1,6 @@
 # Skrip demo ChainMind untuk juri
 
-Durasi yang disarankan: **5 menit**. Demo berjalan offline dengan adapter mock; gunakan hanya data fixture yang disediakan.
+Durasi yang disarankan: **5 menit**. Jalur presentasi memakai preset deterministik; jalur biasa dapat memakai data tenant yang dibuat atau diimpor.
 
 | Waktu | Fokus |
 | --- | --- |
@@ -25,7 +25,7 @@ Durasi yang disarankan: **5 menit**. Demo berjalan offline dengan adapter mock; 
 ## Alur presentasi
 
 1. **Narasi masalah:** kapal pengangkut Microchip X tertunda **5 hari** karena cuaca ekstrem; stok SAP S/4HANA hanya mencakup **3 hari** produksi.
-2. Login dengan `approver` / `demo`. Dalam bahasa Indonesia, panel skenario menampilkan **Cuaca ekstrem**; tekan **Picu gangguan demo**.
+2. Untuk demo reguler, masukkan event dari formulir **Gangguan baru** memakai material yang telah disimpan di tenant. Untuk mengulang narasi tetap, buka `?presenter=1`; mode presenter memuat preset demo cuaca yang deterministik.
 3. Baca feed notifikasi berbahasa Indonesia yang menyebut Microchip X terlambat 5 hari, stok cukup 3 hari, dan rekomendasi Vendor B $135.000. Tombol **Setujui** tetap meminta review dan konfirmasi eksplisit.
 4. Tunjukkan enam tahap dan panel dampak: severity **High**, coverage **3 hari**, stockout tanpa tindakan **2 hari**, biaya inaction ilustratif **$200.000**.
 5. Pada tabel vendor dan grafik, bandingkan empat pilihan. **Vendor B** tiba dalam **2 hari**; Vendor A $120.000/3 hari, Vendor C $110.000/4 hari, Vendor D $100.000/5 hari. Harga terendah tidak selalu memiliki biaya total terendah.
@@ -41,6 +41,12 @@ Durasi yang disarankan: **5 menit**. Demo berjalan offline dengan adapter mock; 
 Launcher memakai localhost dan adapter mock; ia tidak memerlukan layanan cloud. Bila dashboard atau browser gagal, jalankan `uv run python scripts/run_demo.py` (Indonesia) atau `uv run python scripts/run_demo.py --language en` dari root untuk enam tahap, perbandingan vendor, Chain of Thought, draf PO, audit, dan status approval yang sama. Screenshot lokal di bawah `docs/screenshots/` dapat dipakai untuk menjelaskan tampilan, bukan sebagai bukti transaksi produksi.
 
 ## Rationale fixture demo
+
+Angka di bagian ini hanya menjelaskan preset presenter demo. Penggunaan biasa menghitung dampak
+dari material dan vendor tenant di Data Studio; gunakan **Template** untuk melihat skema data, lalu
+impor CSV/JSON atau buat record secara langsung. Form disruption manual memakai material ID yang
+tersimpan. Preset demo hanya di-bootstrap pada store kosong dan dapat dimuat ulang dengan **Reset to
+demo**.
 
 - Stock: 3.000 pcs; konsumsi harian: 1.000 pcs; coverage = `3.000 / 1.000 = 3 hari`.
 - Kapal terlambat 5 hari; perkiraan stockout tanpa tindakan = `5 - 3 = 2 hari`.

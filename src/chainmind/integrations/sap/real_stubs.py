@@ -13,9 +13,10 @@ from chainmind.core.models import (
 class RealSAPClient:
     """Placeholder adapter; implement OAuth and OData via SAP Integration Suite."""
 
-    def get_inventory(self, component_id: str) -> InventorySnapshot:
+    def get_inventory(self, component_id: str, tenant_id: str = "demo") -> InventorySnapshot:
         """Read inventory through the future SAP Integration Suite connection."""
 
+        del tenant_id
         raise IntegrationError(
             "Real SAP S/4HANA connectivity is not configured; implement the "
             "Integration Suite adapter.",

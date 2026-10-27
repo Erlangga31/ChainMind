@@ -89,7 +89,7 @@ def content(language: str) -> tuple[SlideContent, ...]:
                     "Status tetap PENDING_APPROVAL.",
                 ),
                 "Jalankan scenario cuaca, tunjukkan Flow, vendor dan draf PO; jangan mengklaim transaksi SAP nyata.",
-                "docs/screenshots/po-approval.png",
+                "docs/screenshots/dashboard-id-light.png",
             ),
             SlideContent(
                 "Human-in-the-loop dan audit",
@@ -132,7 +132,7 @@ def content(language: str) -> tuple[SlideContent, ...]:
                 "Verifikasi dan batas klaim",
                 (
                     "SAP sandbox simulating S/4HANA OData and Ariba; AWS verified with LocalStack and cdk synth.",
-                    "Backend 155 passed / 9 skipped; Vitest 15 passed; Playwright 10 passed.",
+                    "Backend 163 passed / 9 skipped; Vitest 18 passed; Playwright 11 passed.",
                     "Tidak ada deployment AWS atau koneksi tenant SAP nyata.",
                 ),
                 "Gunakan klaim persis seperti tertulis; LocalStack dan CDK synth bukan verifikasi akun AWS produksi.",
@@ -194,7 +194,7 @@ def content(language: str) -> tuple[SlideContent, ...]:
                 "Status remains PENDING_APPROVAL.",
             ),
             "Trigger the weather scenario and show Flow, vendor comparison, and draft PO. Do not claim a real SAP transaction.",
-            "docs/screenshots/po-approval.png",
+            "docs/screenshots/dashboard-en-light.png",
         ),
         SlideContent(
             "Human-in-the-loop and audit",
@@ -237,7 +237,7 @@ def content(language: str) -> tuple[SlideContent, ...]:
             "Verification and honest scope",
             (
                 "SAP sandbox simulating S/4HANA OData and Ariba; AWS verified with LocalStack and cdk synth.",
-                "Backend 155 passed / 9 skipped; Vitest 15 passed; Playwright 10 passed.",
+                "Backend 163 passed / 9 skipped; Vitest 18 passed; Playwright 11 passed.",
                 "No AWS deployment or live SAP tenant connection was performed.",
             ),
             "Use the exact claim shown. LocalStack and CDK synthesis do not mean production AWS verification.",

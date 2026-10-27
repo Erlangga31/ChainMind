@@ -8,6 +8,7 @@ import chainmind.api.main as api
 from chainmind.api.identity import AuthenticatedUser, authenticated_user
 from chainmind.core.config import Settings
 from chainmind.core.events import EventStore
+from chainmind.core.master_data import SQLiteMasterDataStore
 from chainmind.factory import create_pipeline
 
 client = TestClient(api.app)
@@ -42,16 +43,26 @@ def fake_tenant_context(request: Request) -> AuthenticatedUser:
 
 
 @pytest.fixture(autouse=True)
-def isolate_api_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
+def isolate_api_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Keep API tests independent of persisted local runs and test ordering."""
 
+    database_path = tmp_path / "chainmind.sqlite3"
     monkeypatch.setattr(
         api,
         "pipeline",
         create_pipeline(
-            Settings(mode="mock", notification_backends=[]),
+            Settings(
+                mode="mock",
+                notification_backends=[],
+                event_database_path=str(database_path),
+            ),
             EventStore(),
         ),
+    )
+    monkeypatch.setattr(
+        api,
+        "master_data_store",
+        SQLiteMasterDataStore(database_path),
     )
     monkeypatch.setitem(api.app.dependency_overrides, authenticated_user, fake_authenticated_user)
     monkeypatch.setitem(api.app.dependency_overrides, api.tenant_context, fake_tenant_context)
@@ -109,6 +120,156 @@ def test_validation_and_health_responses_are_structured() -> None:
     response = client.post("/disruptions", json={"delay_days": 0})
     assert response.status_code == 422
     assert response.json()["code"] == "validation_error"
+
+
+def test_master_data_api_validates_crud_import_export_and_tenant_scope() -> None:
+    headers = {"Authorization": "Bearer approver:factory-one"}
+    material = {
+        "component_id": "custom-board",
+        "component_name": "Control board",
+        "plant": "Plant 3",
+        "unit": "pcs",
+        "current_stock": 700,
+        "daily_consumption": 100,
+        "safety_stock": 50,
+        "line_stoppage_cost_per_day": 25000,
+        "purchase_quantity": 2000,
+        "currency": "USD",
+        "purchase_terms": "FOB",
+        "bom_component_ids": [],
+    }
+
+    created = client.post("/data/materials", json=material, headers=headers)
+    assert created.status_code == 201
+    assert created.json()["data_origin"] == "user"
+    listed = client.get("/data/materials", headers=headers).json()
+    assert listed[0]["component_id"] == "custom-board"
+    assert (
+        client.get(
+            "/data/materials",
+            headers={"Authorization": "Bearer approver:another-factory"},
+        ).json()
+        == []
+    )
+    assert client.get("/data/audit", headers=headers).json()[0]["action"] == "create"
+    assert (
+        client.get(
+            "/data/audit",
+            headers={"Authorization": "Bearer approver:another-factory"},
+        ).json()
+        == []
+    )
+
+    invalid_import = client.post(
+        "/data/materials/import",
+        headers=headers,
+        json={
+            "format": "json",
+            "content": '[{"component_id":"other","component_name":"Valid","plant":"P",'
+            '"current_stock":12,"daily_consumption":2,"line_stoppage_cost_per_day":100,'
+            '"purchase_quantity":20},{"component_id":"bad"}]',
+        },
+    )
+    assert invalid_import.status_code == 200
+    assert invalid_import.json()["imported"] == 1
+    assert invalid_import.json()["errors"][0]["row"] == 2
+    assert "custom-board" in client.get("/data/materials/export?format=json", headers=headers).text
+
+    updated = {**material, "current_stock": 900}
+    assert (
+        client.put(
+            "/data/materials/custom-board",
+            json=updated,
+            headers=headers,
+        ).json()["current_stock"]
+        == 900
+    )
+    assert client.delete("/data/materials/custom-board", headers=headers).status_code == 204
+    assert client.delete("/data/materials/custom-board", headers=headers).status_code == 404
+
+    viewer = client.post(
+        "/data/materials",
+        json=material,
+        headers={"Authorization": "Bearer viewer:factory-one"},
+    )
+    assert viewer.status_code == 403
+
+
+def test_pipeline_uses_materials_and_vendor_offers_created_through_the_api() -> None:
+    headers = {"Authorization": "Bearer approver:factory-two"}
+    material = {
+        "component_id": "custom-sensor",
+        "component_name": "Custom sensor",
+        "plant": "Plant 4",
+        "current_stock": 400,
+        "daily_consumption": 100,
+        "line_stoppage_cost_per_day": 25000,
+        "purchase_quantity": 1000,
+    }
+    assert client.post("/data/materials", json=material, headers=headers).status_code == 201
+    for offer in (
+        {
+            "vendor_id": "rapid-supply",
+            "vendor_name": "Rapid Supply",
+            "component_ids": ["custom-sensor"],
+            "region": "Local",
+            "distance_km": 50,
+            "lead_time_days": 2,
+            "unit_price": 27,
+            "capacity": 2000,
+            "risk_score": 30,
+            "terms": "Air",
+        },
+        {
+            "vendor_id": "budget-supply",
+            "vendor_name": "Budget Supply",
+            "component_ids": ["custom-sensor"],
+            "region": "Regional",
+            "distance_km": 500,
+            "lead_time_days": 3,
+            "unit_price": 22,
+            "capacity": 2000,
+            "risk_score": 20,
+            "terms": "Road",
+        },
+    ):
+        assert client.post("/data/vendors", json=offer, headers=headers).status_code == 201
+    assert (
+        client.post(
+            "/data/shipments",
+            json={
+                "shipment_id": "custom-shipment",
+                "component_id": "custom-sensor",
+                "quantity": 1000,
+                "expected_date": "2026-11-15",
+            },
+            headers=headers,
+        ).status_code
+        == 201
+    )
+
+    created = client.post(
+        "/disruptions",
+        headers=headers,
+        json={
+            "title": "Custom material delay",
+            "description": "A supplier reported a delay for a user-created material.",
+            "component_id": "ignored-material",
+            "component_name": "Ignored material",
+            "shipment_id": "custom-shipment",
+            "delay_days": 5,
+            "event_type": "logistics_delay",
+        },
+    )
+    assert created.status_code == 201, created.text
+    run = client.get(f"/runs/{created.json()['run_id']}", headers=headers).json()
+    assert run["event"]["component_id"] == "custom-sensor"
+    assert run["material_impacts"][0]["coverage_days"] == 4
+    assert {item["vendor"]["vendor_id"] for item in run["vendor_comparison"]} == {
+        "rapid-supply",
+        "budget-supply",
+    }
+    assert run["draft_po"]["vendor_name"] in {"Rapid Supply", "Budget Supply"}
 
 
 def test_kpis_include_only_completed_tracking_and_are_labeled_illustrative() -> None:
