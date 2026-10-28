@@ -132,3 +132,21 @@ class DynamoDBEventStore(RunStore):
                 details={"reason": str(exc)},
             ) from exc
         return sorted(runs, key=lambda run: run.created_at, reverse=True)
+
+    def delete_tenant(self, tenant_id: str) -> int:
+        """Delete a tenant's runs and event idempotency records."""
+
+        deleted = 0
+        try:
+            for run in self.list():
+                if run.tenant_id != tenant_id:
+                    continue
+                self._table.delete_item(Key={"run_id": str(run.run_id)})
+                self._table.delete_item(Key={"run_id": event_record_id(run.event)})
+                deleted += 1
+        except (BotoCoreError, ClientError) as exc:
+            raise IntegrationError(
+                "Tenant run history could not be deleted from DynamoDB.",
+                details={"reason": str(exc)},
+            ) from exc
+        return deleted

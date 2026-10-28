@@ -135,6 +135,32 @@ test("viewer can inspect a draft but cannot approve it", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Reject" })).toHaveCount(0);
 });
 
+test("approver can filter notifications and mark distinct items as read", async ({ page }) => {
+  await signIn(page, "approver");
+  await triggerScenario(page, "Notification grouping scenario", "weather");
+  await page.getByRole("button", { name: /Notification feed/ }).click();
+
+  const search = page.getByRole("textbox", { name: "Search notifications" });
+  await search.fill("Notification grouping scenario");
+  await expect(page.getByText(/Raw material Microchip X delayed/)).toBeVisible();
+  await page.getByRole("button", { name: "Mark all as read" }).click();
+  await page.getByRole("button", { name: /Unread · 0/ }).click();
+  await expect(page.getByText("No notifications match this filter.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Notification feed" })).toBeVisible();
+});
+
+test("approver can clear tenant demo history after confirmation", async ({ page }) => {
+  await signIn(page, "approver");
+  await triggerScenario(page, "Clear history scenario", "weather");
+  await page.getByRole("button", { name: "Data Studio" }).click();
+  await page.getByRole("button", { name: "Clear demo history" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("This tenant's runs and notifications will be removed.");
+  await dialog.getByRole("button", { name: "Clear history" }).click();
+  await expect(page.getByRole("status")).toContainText(/runs and notifications cleared/);
+});
+
 test("approver can request a vendor revision", async ({ page }) => {
   await signIn(page, "approver");
   await triggerScenario(page, "Extreme weather delays cargo ship", "weather");

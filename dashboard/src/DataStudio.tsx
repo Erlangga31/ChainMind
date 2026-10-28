@@ -28,6 +28,7 @@ export function DataStudio({ request, requestText, language }: DataStudioProps) 
   const [generatorSize, setGeneratorSize] = useState("3");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [historyConfirm, setHistoryConfirm] = useState(false);
   const isId = language === "id";
   const t = (id: string, en: string) => isId ? id : en;
 
@@ -132,6 +133,25 @@ export function DataStudio({ request, requestText, language }: DataStudioProps) 
     setFormat(file.name.toLowerCase().endsWith(".csv") ? "csv" : "json");
   }
 
+  async function clearHistory() {
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await request<{ deleted_runs: number }>("/runs/history", {
+        method: "DELETE",
+      });
+      setMessage(t(
+        `${result.deleted_runs} run dan notifikasi dihapus.`,
+        `${result.deleted_runs} runs and notifications cleared.`,
+      ));
+      setHistoryConfirm(false);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="flex min-h-0 flex-col gap-4 overflow-hidden rounded-2xl bg-white p-5 shadow-card" aria-label="Data Studio">
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -146,6 +166,24 @@ export function DataStudio({ request, requestText, language }: DataStudioProps) 
           </select>
         </label>
       </header>
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3">
+        <p className="text-sm text-rose-900">{t("Bersihkan run demo dan notifikasi lama.", "Remove old demo runs and notifications.")}</p>
+        <button type="button" className="rounded-lg border border-rose-400 px-3 py-2 text-sm font-semibold text-rose-800" disabled={busy} onClick={() => setHistoryConfirm(true)}>
+          {t("Bersihkan riwayat demo", "Clear demo history")}
+        </button>
+      </div>
+      {historyConfirm && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 p-4" role="presentation">
+          <section role="dialog" aria-modal="true" aria-labelledby="clear-history-title" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 id="clear-history-title" className="text-lg font-bold text-ink">{t("Bersihkan riwayat demo?", "Clear demo history?")}</h3>
+            <p className="mt-2 text-sm text-slate-600">{t("Semua run dan notifikasi tenant ini akan dihapus. Data master tetap tersimpan.", "This tenant's runs and notifications will be removed. Master data will remain.")}</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setHistoryConfirm(false)}>{t("Batal", "Cancel")}</button>
+              <button type="button" className="rounded-lg bg-rose-700 px-3 py-2 text-sm font-semibold text-white" disabled={busy} onClick={() => void clearHistory()}>{t("Hapus riwayat", "Clear history")}</button>
+            </div>
+          </section>
+        </div>
+      )}
       <div className="grid min-h-0 flex-1 gap-4 overflow-hidden xl:grid-cols-2">
         <div className="flex min-h-0 flex-col gap-3 overflow-hidden">
           <div className="flex flex-wrap gap-2">
