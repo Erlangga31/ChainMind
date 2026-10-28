@@ -10,6 +10,16 @@ import {
 } from "./components";
 import { FlowDiagram } from "./FlowDiagram";
 import { DataStudio } from "./DataStudio";
+import { LoginScreen } from "./LoginScreen";
+import { WelcomeScreen } from "./Welcome";
+import {
+  groupNotifications,
+  markNotificationRead as persistNotificationRead,
+  markNotificationsRead,
+  notificationBadgeLabel,
+  notificationStorageKey,
+  unreadNotificationCount,
+} from "./notificationFeed";
 import type { ApiError, DisruptionRun, KPIReport, UsageReport } from "./types";
 import { formatNotification, translate, type Language } from "./i18n";
 
@@ -18,6 +28,7 @@ const OIDC_ISSUER = import.meta.env.VITE_OIDC_ISSUER ?? "http://127.0.0.1:8100";
 const OIDC_CLIENT_ID = import.meta.env.VITE_OIDC_CLIENT_ID ?? "chainmind-dashboard";
 const OIDC_REDIRECT_URI = import.meta.env.VITE_OIDC_REDIRECT_URI ?? "http://localhost:5173/";
 const DEMO_PRESET = {
+  event_id: "00000000-0000-4000-8000-000000000001",
   title: "Extreme weather delays cargo ship",
   description: "Severe weather delayed the vessel carrying Microchip X by five days.",
   event_type: "weather",
@@ -138,7 +149,12 @@ function randomBase64Url(size: number): string {
     .replace(/=+$/g, "");
 }
 
-async function beginLogin(): Promise<void> {
+async function beginLogin(
+  language: Language,
+  largeText: boolean,
+  highContrast: boolean,
+  darkTheme: boolean,
+): Promise<void> {
   if (new URLSearchParams(window.location.search).get("presenter") === "1") {
     sessionStorage.setItem("chainmind.presenter", "true");
   } else {
@@ -160,6 +176,10 @@ async function beginLogin(): Promise<void> {
     response_type: "code",
     client_id: OIDC_CLIENT_ID,
     redirect_uri: OIDC_REDIRECT_URI,
+    ui_locales: language,
+    text_scale: largeText ? "large" : "normal",
+    contrast: highContrast ? "high" : "standard",
+    color_scheme: darkTheme ? "dark" : "light",
     scope: "openid profile",
     state,
     nonce,
@@ -224,6 +244,33 @@ function StatusPill({ status }: { status: string }) {
   return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${tone}`}>{status.replaceAll("_", " ")}</span>;
 }
 
+function notificationText(
+  language: Language,
+  notification: ReturnType<typeof groupNotifications>[number],
+): string {
+  const { run } = notification;
+  if (notification.kind === "draft_ready") {
+    const coverageDays = run.inventory_snapshot
+      ? run.inventory_snapshot.current_stock / run.inventory_snapshot.daily_consumption
+      : 0;
+    return formatNotification(
+      language,
+      run.inventory_snapshot?.component_name ?? run.event.component_name,
+      run.event.delay_days,
+      coverageDays,
+      run.draft_po?.vendor_name ?? "—",
+      money(run.draft_po?.total_price ?? 0),
+    );
+  }
+  if (notification.kind === "approval_overdue") {
+    return language === "id"
+      ? `Persetujuan manusia untuk draf purchase order ${run.draft_po?.vendor_name ?? ""} telah melewati batas waktu.`
+      : `Human approval is overdue for ${run.draft_po?.vendor_name ?? "the supplier"}'s draft purchase order.`;
+  }
+  return run.execution_tracking?.alert ??
+    translate(language, "trackingDeviation");
+}
+
 function presenterNarrations(language: Language): string[] {
   return language === "id"
     ? [
@@ -261,6 +308,14 @@ export default function App() {
     () => localStorage.getItem("chainmind.theme") === "dark",
   );
   const [session, setSession] = useState<AuthSession | null>(null);
+  const [loginStarting, setLoginStarting] = useState(false);
+  const [entryStep, setEntryStep] = useState<"welcome" | "login">(() =>
+    presenter ||
+    new URLSearchParams(window.location.search).has("code") ||
+    sessionStorage.getItem("chainmind.welcome.seen") === "true"
+      ? "login"
+      : "welcome",
+  );
   const [runs, setRuns] = useState<DisruptionRun[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [run, setRun] = useState<DisruptionRun | null>(null);
@@ -284,6 +339,9 @@ export default function App() {
   const [pendingDecision, setPendingDecision] = useState<"approve" | "reject" | "revise" | null>(null);
   const [decisionConfirmed, setDecisionConfirmed] = useState(false);
   const [notificationToken, setNotificationToken] = useState("");
+  const [notificationReadRevision, setNotificationReadRevision] = useState(0);
+  const [notificationFilter, setNotificationFilter] = useState<"all" | "unread">("all");
+  const [notificationSearch, setNotificationSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [apiUnavailable, setApiUnavailable] = useState(false);
@@ -474,9 +532,40 @@ export default function App() {
     () => run?.vendor_comparison.filter((evaluation) => evaluation.feasible) ?? [],
     [run],
   );
+  const notificationItems = useMemo(
+    () => groupNotifications(
+      runs,
+      (key) =>
+        localStorage.getItem(
+          notificationStorageKey(session?.tenantId ?? "demo", key),
+        ) === "true",
+    ),
+    [notificationReadRevision, runs, session?.tenantId],
+  );
+  const unreadNotifications = useMemo(
+    () => unreadNotificationCount(notificationItems),
+    [notificationItems],
+  );
   const pendingNotifications = useMemo(
-    () => runs.filter((item) => item.status === "PENDING_APPROVAL" && item.draft_po),
-    [runs],
+    () =>
+      notificationItems.filter(
+        (item) => item.kind === "draft_ready" && item.run.status === "PENDING_APPROVAL",
+      ),
+    [notificationItems],
+  );
+  const visibleNotifications = useMemo(
+    () =>
+      notificationItems.filter((item) => {
+        if (notificationFilter === "unread" && !item.unread) return false;
+        const searchText = [
+          item.run.event.title,
+          item.run.event.component_name,
+          item.kind,
+          item.run.draft_po?.vendor_name ?? "",
+        ].join(" ").toLocaleLowerCase();
+        return searchText.includes(notificationSearch.trim().toLocaleLowerCase());
+      }),
+    [notificationFilter, notificationItems, notificationSearch],
   );
   const pending = run?.status === "PENDING_APPROVAL";
   const replayRun = useMemo(() => {
@@ -511,8 +600,10 @@ export default function App() {
           };
       const created = await request<{ run_id: string }>("/disruptions", {
         method: "POST",
+        ...(presenter ? { headers: { "Idempotency-Key": "presenter-demo-weather-v1" } } : {}),
         body: JSON.stringify({
           title: event.title,
+          ...(presenter ? { event_id: DEMO_PRESET.event_id } : {}),
           description: event.description,
           event_type: event.event_type,
           delay_days: event.delay_days,
@@ -531,6 +622,17 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function markNotificationRead(key: string) {
+    persistNotificationRead(session?.tenantId ?? "demo", key, localStorage);
+    setNotificationReadRevision((revision) => revision + 1);
+  }
+
+  function markAllNotificationsRead() {
+    const tenantId = session?.tenantId ?? "demo";
+    markNotificationsRead(tenantId, notificationItems, localStorage);
+    setNotificationReadRevision((revision) => revision + 1);
   }
 
   async function loadReplay() {
@@ -697,39 +799,61 @@ export default function App() {
       : []),
   ];
 
+  async function startLogin() {
+    setLoginStarting(true);
+    setError("");
+    try {
+      await beginLogin(language, largeText, highContrast, darkTheme);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not start sign-in.");
+      setLoginStarting(false);
+    }
+  }
+
+  function returnToWelcome() {
+    sessionStorage.removeItem("chainmind.welcome.seen");
+    sessionStorage.removeItem("chainmind.presenter");
+    window.history.replaceState({}, "", window.location.pathname);
+    setError("");
+    setLoginStarting(false);
+    setEntryStep("welcome");
+  }
+
   if (!session) {
+    if (entryStep === "welcome") {
+      return (
+        <WelcomeScreen
+          language={language}
+          darkTheme={darkTheme}
+          largeText={largeText}
+          highContrast={highContrast}
+          onLanguageChange={setLanguage}
+          onThemeChange={() => setDarkTheme((value) => !value)}
+          onLargeTextChange={() => setLargeText((value) => !value)}
+          onHighContrastChange={() => setHighContrast((value) => !value)}
+          onGetStarted={() => {
+            sessionStorage.setItem("chainmind.welcome.seen", "true");
+            setEntryStep("login");
+          }}
+        />
+      );
+    }
     return (
-      <main className="grid min-h-screen place-items-center bg-canvas p-6">
-        <section className="w-full max-w-md rounded-3xl bg-white p-8 shadow-card">
-          <p className="text-sm font-semibold uppercase tracking-widest text-accent">ChainMind SSO</p>
-          <div className="flex items-center justify-between gap-3">
-            <h1 className="mt-2 text-2xl font-bold text-ink">{t("signInTitle")}</h1>
-            <div className="flex flex-wrap justify-end gap-2">
-              <LanguageControls language={language} onChange={setLanguage} />
-              <AccessibilityControls
-                largeText={largeText}
-                highContrast={highContrast}
-                onLargeTextChange={setLargeText}
-                onHighContrastChange={setHighContrast}
-                language={language}
-              />
-            </div>
-          </div>
-          <p className="mt-3 text-sm leading-6 text-slate-600">
-            {t("signInDescription")}
-          </p>
-          {error && <p role="alert" className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
-          {apiUnavailable && <p className="mt-3 text-xs text-slate-500">{t("replayRequiresSignIn")}</p>}
-          <button
-            className="mt-6 w-full rounded-xl bg-accent px-5 py-3 font-semibold text-white"
-            onClick={() => void beginLogin().catch((caught: unknown) => {
-              setError(caught instanceof Error ? caught.message : "Could not start sign-in.");
-            })}
-          >
-            {t("signIn")}
-          </button>
-        </section>
-      </main>
+      <LoginScreen
+        language={language}
+        darkTheme={darkTheme}
+        largeText={largeText}
+        highContrast={highContrast}
+        showDemoAccounts={apiMode === "mock" || apiMode === "sandbox"}
+        loading={loginStarting}
+        error={error || (apiUnavailable ? t("replayRequiresSignIn") : "")}
+        onLanguageChange={setLanguage}
+        onThemeChange={() => setDarkTheme((value) => !value)}
+        onLargeTextChange={() => setLargeText((value) => !value)}
+        onHighContrastChange={() => setHighContrast((value) => !value)}
+        onBack={returnToWelcome}
+        onSignIn={() => void startLogin()}
+      />
     );
   }
 
@@ -749,11 +873,11 @@ export default function App() {
             <LanguageControls language={language} onChange={setLanguage} />
             <button
               type="button"
-              aria-label={`${language === "id" ? "Notifikasi" : "Notifications"}${pendingNotifications.length > 0 ? ` ${pendingNotifications.length}` : ""}`}
+              aria-label={`${t("notificationFeed")}${unreadNotifications > 0 ? ` · ${notificationBadgeLabel(unreadNotifications)} ${t("unread")}` : ""}`}
               className="rounded-lg border border-slate-500 px-3 py-1 text-xs text-white"
               onClick={() => setPage("notifications")}
             >
-              <span aria-hidden="true">🔔</span>{pendingNotifications.length > 0 && <span className="ml-1">{pendingNotifications.length}</span>}
+              <span aria-hidden="true">🔔</span>{unreadNotifications > 0 && <span className="ml-1">{notificationBadgeLabel(unreadNotifications)}</span>}
             </button>
             <button type="button" className="rounded-lg border border-slate-500 px-3 py-1 text-xs text-white" aria-label={language === "id" ? "Ganti tema" : "Toggle theme"} onClick={() => setDarkTheme((value) => !value)}>
               {darkTheme ? "☀" : "☾"}
@@ -887,14 +1011,35 @@ export default function App() {
         <section className="min-h-0 flex-1 overflow-hidden">
         {page === "notifications" ? (
           <section aria-label={t("notificationFeed")} className="h-full overflow-auto rounded-2xl bg-white p-5 shadow-card">
-            <h2 className="text-lg font-bold text-ink">{t("notificationFeed")} · {language === "id" ? "Audit" : "Audit"}</h2>
-            {pendingNotifications.length === 0 ? <p className="mt-2 text-sm text-slate-500">{t("noNotifications")}</p> : (
-              <ul className="mt-3 space-y-3">{pendingNotifications.map((item) => (
-                <li key={item.run_id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-4">
-                  <p className="min-w-60 flex-1 text-sm">{formatNotification(language, item.inventory_snapshot?.component_name ?? item.event.component_name, item.event.delay_days, item.inventory_snapshot ? item.inventory_snapshot.current_stock / item.inventory_snapshot.daily_consumption : 0, item.draft_po?.vendor_name ?? "—", money(item.draft_po?.total_price ?? 0))}</p>
-                  <div className="flex gap-2">
-                    <button className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={busy || !canApprove || replayMode} onClick={() => void openNotificationApproval(item.run_id)}>{t("approve")}</button>
-                    <button className="rounded-lg border px-3 py-2 text-sm" onClick={() => void selectRun(item.run_id)}>{t("viewDetails")}</button>
+            <header className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-lg font-bold text-ink">{t("notificationFeed")} · Audit</h2>
+              <button type="button" className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" disabled={!unreadNotifications} onClick={markAllNotificationsRead}>{t("markAllRead")}</button>
+            </header>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <div role="group" aria-label={t("notificationFeed")} className="flex gap-1">
+                <button type="button" aria-pressed={notificationFilter === "all"} className="rounded-lg border px-3 py-2 text-sm" onClick={() => setNotificationFilter("all")}>{t("notificationAll")}</button>
+                <button type="button" aria-pressed={notificationFilter === "unread"} className="rounded-lg border px-3 py-2 text-sm" onClick={() => setNotificationFilter("unread")}>{t("notificationUnread")} · {unreadNotifications}</button>
+              </div>
+              <input aria-label={t("notificationSearch")} className="min-w-48 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" value={notificationSearch} onChange={(event) => setNotificationSearch(event.target.value)} />
+            </div>
+            {visibleNotifications.length === 0 ? <p className="mt-4 text-sm text-slate-500">{t("noNotifications")}</p> : (
+              <ul className="mt-3 space-y-3">{visibleNotifications.map((item) => (
+                <li key={item.key} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-4">
+                  <div className="min-w-60 flex-1">
+                    <div className="mb-1 flex flex-wrap items-center gap-2 text-xs font-semibold">
+                      <span className="rounded-full bg-slate-100 px-2 py-1">{t(item.kind === "draft_ready" ? "draftReady" : item.kind === "approval_overdue" ? "approvalOverdue" : "trackingDeviation")}</span>
+                      {item.count > 1 && <span className="rounded-full bg-teal-50 px-2 py-1 text-teal-900">×{item.count}</span>}
+                      {item.unread && <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-900">{t("unread")}</span>}
+                    </div>
+                    <p className="text-sm">{notificationText(language, item)}</p>
+                    <p className="mt-1 text-xs text-slate-500">{item.run.event.title} · {item.run.status.replaceAll("_", " ")}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {item.kind === "draft_ready" && item.run.status === "PENDING_APPROVAL" && (
+                      <button className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={busy || !canApprove || replayMode} onClick={() => void openNotificationApproval(item.run.run_id)}>{t("approve")}</button>
+                    )}
+                    <button className="rounded-lg border px-3 py-2 text-sm disabled:opacity-50" disabled={!item.unread} onClick={() => markNotificationRead(item.key)}>{t("markRead")}</button>
+                    <button className="rounded-lg border px-3 py-2 text-sm" onClick={() => void selectRun(item.run.run_id)}>{t("viewDetails")}</button>
                   </div>
                 </li>
               ))}</ul>
@@ -959,23 +1104,11 @@ export default function App() {
                 <h2 className="font-bold text-ink">{t("notificationFeed")}</h2>
                 {pendingNotifications.length === 0 ? <p className="mt-1 text-xs text-slate-500">{t("noNotifications")}</p> : (
                   <ul className="mt-2 space-y-2">{pendingNotifications.map((item) => (
-                    <li key={item.run_id} className="flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-sm">
-                      <p className="min-w-60 flex-1 text-sm leading-5 text-slate-700">
-                        {formatNotification(
-                          language,
-                          item.inventory_snapshot?.component_name ?? item.event.component_name,
-                          item.event.delay_days,
-                          item.inventory_snapshot
-                            ? item.inventory_snapshot.current_stock /
-                              item.inventory_snapshot.daily_consumption
-                            : 0,
-                          item.draft_po?.vendor_name ?? "—",
-                          money(item.draft_po?.total_price ?? 0),
-                        )}
-                      </p>
+                    <li key={item.key} className="flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-sm">
+                      <p className="min-w-60 flex-1 text-sm leading-5 text-slate-700">{notificationText(language, item)}</p>
                       <div className="flex gap-2">
-                        <button className="rounded-lg bg-accent px-3 py-1 text-xs font-semibold text-white" disabled={!canApprove || replayMode} onClick={() => void openNotificationApproval(item.run_id)}>{t("approve")}</button>
-                        <button className="rounded-lg border px-3 py-1 text-xs" onClick={() => void selectRun(item.run_id)}>{t("viewDetails")}</button>
+                        <button className="rounded-lg bg-accent px-3 py-1 text-xs font-semibold text-white" disabled={!canApprove || replayMode} onClick={() => void openNotificationApproval(item.run.run_id)}>{t("approve")}</button>
+                        <button className="rounded-lg border px-3 py-1 text-xs" onClick={() => void selectRun(item.run.run_id)}>{t("viewDetails")}</button>
                       </div>
                     </li>
                   ))}</ul>

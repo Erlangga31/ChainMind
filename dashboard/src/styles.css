@@ -25,6 +25,216 @@ body {
   overflow: hidden;
 }
 
+.entry-page {
+  background:
+    radial-gradient(ellipse at 78% 16%, rgba(45, 212, 191, 0.19), transparent 34%),
+    radial-gradient(ellipse at 15% 84%, rgba(56, 189, 248, 0.14), transparent 34%),
+    #f2f5f8;
+}
+
+.entry-network {
+  opacity: 0.8;
+}
+
+.entry-glass {
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 24px 80px rgba(15, 35, 55, 0.12);
+  backdrop-filter: blur(18px);
+}
+
+.entry-tool-button,
+.entry-secondary-button {
+  min-height: 2.5rem;
+  border: 1px solid rgba(100, 116, 139, 0.45);
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 0.5rem 0.8rem;
+  color: #18212f;
+  font-size: 0.8rem;
+  font-weight: 700;
+  transition: background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.entry-tool-button:hover,
+.entry-secondary-button:hover {
+  border-color: #0f766e;
+  background: #f0fdfa;
+}
+
+.entry-primary-button {
+  display: inline-flex;
+  min-height: 3rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  border: 2px solid #0f766e;
+  border-radius: 0.85rem;
+  background: #0f766e;
+  padding: 0.75rem 1.25rem;
+  color: #fff;
+  font-weight: 800;
+  box-shadow: 0 8px 24px rgba(15, 118, 110, 0.2);
+  transition: background-color 140ms ease, transform 140ms ease;
+}
+
+.entry-primary-button:hover {
+  transform: translateY(-1px);
+  background: #115e59;
+}
+
+.entry-dialog {
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: #f8fafc;
+}
+
+.entry-overlay {
+  background: rgba(9, 20, 33, 0.64);
+  backdrop-filter: blur(8px);
+}
+
+.entry-login-brand {
+  background:
+    radial-gradient(ellipse at 82% 18%, rgba(45, 212, 191, 0.36), transparent 34%),
+    linear-gradient(145deg, #10243a 5%, #123a4b 52%, #0f766e 115%);
+}
+
+.entry-login-panel {
+  border: 1px solid rgba(255, 255, 255, 0.66);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 18px 60px rgba(15, 35, 55, 0.1);
+  backdrop-filter: blur(16px);
+}
+
+.entry-spinner {
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: entry-spin 0.8s linear infinite;
+}
+
+@keyframes entry-spin {
+  to { transform: rotate(360deg); }
+}
+
+:root[data-theme="dark"] .entry-page {
+  background:
+    radial-gradient(ellipse at 78% 16%, rgba(13, 148, 136, 0.28), transparent 36%),
+    radial-gradient(ellipse at 15% 84%, rgba(14, 116, 144, 0.22), transparent 36%),
+    #0b1220;
+}
+
+:root[data-theme="dark"] .entry-glass {
+  border-color: rgba(100, 116, 139, 0.38);
+  background: rgba(17, 30, 48, 0.78);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+}
+
+:root[data-theme="dark"] .entry-tool-button,
+:root[data-theme="dark"] .entry-secondary-button {
+  border-color: #475569;
+  background: rgba(23, 34, 53, 0.84);
+  color: #e2e8f0;
+}
+
+:root[data-theme="dark"] .entry-tool-button:hover,
+:root[data-theme="dark"] .entry-secondary-button:hover {
+  background: #20394c;
+}
+
+:root[data-theme="dark"] .entry-dialog {
+  background: #111e30;
+}
+
+:root[data-theme="dark"] .entry-login-panel {
+  border-color: rgba(100, 116, 139, 0.38);
+  background: rgba(17, 30, 48, 0.84);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.34);
+}
+
+:root[data-theme="dark"] .entry-login-panel [class~="bg-white/75"] {
+  border-color: #475569;
+  background: rgba(17, 30, 48, 0.96);
+}
+
+:root[data-theme="dark"] .entry-login-panel .text-ink {
+  color: #f1f5f9 !important;
+}
+
+:root[data-theme="dark"] .entry-page .text-teal-800,
+:root[data-theme="dark"] .entry-page .text-teal-700 {
+  color: #99f6e4 !important;
+}
+
+:root[data-theme="dark"] .entry-page .text-slate-600,
+:root[data-theme="dark"] .entry-page .text-slate-500 {
+  color: #cbd5e1 !important;
+}
+
+:root[data-contrast="high"] .entry-page {
+  background: #fff !important;
+}
+
+:root[data-contrast="high"][data-theme="dark"] .entry-page {
+  background: #000 !important;
+}
+
+:root[data-contrast="high"] .entry-glass,
+:root[data-contrast="high"] .entry-dialog {
+  border: 3px solid currentColor;
+  background: #fff !important;
+  color: #000 !important;
+}
+
+:root[data-contrast="high"][data-theme="dark"] .entry-glass,
+:root[data-contrast="high"][data-theme="dark"] .entry-dialog,
+:root[data-contrast="high"][data-theme="dark"] .entry-login-panel {
+  background: #000 !important;
+  color: #fff !important;
+}
+
+:root[data-contrast="high"] .entry-login-panel {
+  border: 3px solid currentColor;
+  background: #fff !important;
+  color: #000 !important;
+}
+
+:root[data-contrast="high"] .entry-login-panel [class~="bg-white/75"] {
+  border-color: #000 !important;
+  background: #fff !important;
+}
+
+:root[data-contrast="high"] .entry-login-panel .text-ink,
+:root[data-contrast="high"] .entry-login-panel .text-slate-600,
+:root[data-contrast="high"] .entry-login-panel .text-slate-300,
+:root[data-contrast="high"] .entry-login-panel .text-slate-500 {
+  color: #000 !important;
+}
+
+:root[data-contrast="high"][data-theme="dark"] .entry-login-panel [class~="bg-white/75"] {
+  border-color: #fff !important;
+  background: #000 !important;
+}
+
+:root[data-contrast="high"][data-theme="dark"] .entry-login-panel .text-ink,
+:root[data-contrast="high"][data-theme="dark"] .entry-login-panel .text-slate-600,
+:root[data-contrast="high"][data-theme="dark"] .entry-login-panel .text-slate-300,
+:root[data-contrast="high"][data-theme="dark"] .entry-login-panel .text-slate-500 {
+  color: #fff !important;
+}
+
+.entry-page :focus-visible {
+  outline: 3px solid #0f766e;
+  outline-offset: 3px;
+}
+
+.entry-page button:focus-visible {
+  outline: 3px solid #0f766e;
+  outline-offset: 3px;
+}
+
 button,
 input,
 select {

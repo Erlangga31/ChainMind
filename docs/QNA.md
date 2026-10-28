@@ -96,20 +96,20 @@ keamanan tenant, serta estimasi finansial yang belum tervalidasi.
 
 ### 19. Apa yang benar-benar telah diuji?
 
-Backend 163 passed / 9 skipped, Vitest 18 passed dan Playwright 11 passed pada verifikasi lokal;
-CI juga menjalankan suite backend, dashboard, E2E, LocalStack, compose dan CDK. Lihat
-[COVERAGE.md](./COVERAGE.md) untuk tanggal dan level verifikasi terperinci.
+Lihat [COVERAGE.md](./COVERAGE.md) untuk hasil verifikasi lokal yang diperbarui, termasuk backend,
+Vitest, Playwright, build/typecheck, Ruff, serta batas tes LocalStack dan AWS/SAP live.
 
 ### 20. Apakah pricing dan KPI sudah tervalidasi?
 
 Belum. Tier, onboarding, manual baseline, dan target KPI bersifat ilustratif sampai pilot dan
 analisis komersial dilakukan.
 
-### 21. Apakah data di-hardcode?
+### 21. Apakah data di-hardcode? (Is the data hardcoded?)
 
-Preset demo memang ditanam sebagai seed deterministik dan hanya dipakai untuk tenant kosong atau
-mode presenter. Selain preset itu, analisis berjalan dari data tenant yang dibuat atau diimpor di
-Data Studio dan dari event yang dikirim pengguna. Nilai vendor dan hasil KPI bukan konstanta UI.
+Preset demo memang ditanam sebagai seed deterministik dan dapat dimuat ulang dengan seed tetap
+untuk presenter. Pengguna juga dapat membuat atau mengimpor material, pemasok, shipment, dan event;
+generator sample membuat dataset bervariasi dan deterministik dari seed. Analisis reguler memakai
+data yang tersimpan atau diimpor—angka vendor dan KPI diturunkan dari input, bukan konstanta UI.
 SAP dan AWS tetap berupa sandbox/mock; bukan integrasi produksi.
 
 ## Kalimat klaim yang disetujui

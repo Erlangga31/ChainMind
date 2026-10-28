@@ -69,6 +69,24 @@ describe("OIDC-authenticated approval dashboard", () => {
     window.history.replaceState({}, "", "/");
   });
 
+  it("shows a first-visit welcome screen and remembers the transition to login for this tab", async () => {
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "ChainMind" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Mulai" }));
+
+    expect(await screen.findByRole("heading", { name: "Masuk ke menara kendali" })).toBeInTheDocument();
+    expect(sessionStorage.getItem("chainmind.welcome.seen")).toBe("true");
+  });
+
+  it("skips the welcome screen for presenter mode", async () => {
+    window.history.replaceState({}, "", "/?presenter=1");
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Masuk ke menara kendali" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Mulai" })).not.toBeInTheDocument();
+  });
+
   it("keeps authenticated viewers read-only", async () => {
     installAuthenticatedFetch("viewer");
 

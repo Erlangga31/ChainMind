@@ -83,6 +83,7 @@ export interface DisruptionRun {
     purchase_quantity: number;
   } | null;
   cost_of_inaction: number;
+  approval_overdue_notified?: boolean;
   audit_log: {
     timestamp: string;
     agent: string;

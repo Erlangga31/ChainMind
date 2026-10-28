@@ -494,6 +494,23 @@ def list_runs(user: Annotated[AuthenticatedUser, Depends(tenant_context)]) -> li
     return [run for run in pipeline.store.list() if run.tenant_id == user.tenant_id]
 
 
+@app.delete("/runs/history")
+def clear_run_history(
+    user: Annotated[AuthenticatedUser, Depends(require_approver)],
+) -> dict[str, int]:
+    """Clear run history for the authenticated tenant and retain an audit record."""
+
+    deleted = pipeline.store.delete_tenant(user.tenant_id)
+    master_data_store.record_audit(
+        user.tenant_id,
+        user.subject,
+        "clear",
+        "run_history",
+        str(deleted),
+    )
+    return {"deleted_runs": deleted}
+
+
 @app.get("/kpis", response_model=KPIReport)
 def get_kpis(user: Annotated[AuthenticatedUser, Depends(tenant_context)]) -> KPIReport:
     """Return explicitly illustrative aggregate outcomes from completed tracking runs."""

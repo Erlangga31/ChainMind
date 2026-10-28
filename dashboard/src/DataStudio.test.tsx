@@ -9,6 +9,7 @@ function renderStudio() {
     if (path === "/data/materials/import") {
       return { imported: 1, errors: [{ row: 2, message: "daily_consumption must be positive" }] } as T;
     }
+    if (path === "/runs/history") return { deleted_runs: 2 } as T;
     return [] as T;
   };
   const requestText = vi.fn(async () => "[]");
@@ -87,5 +88,26 @@ describe("tenant Data Studio", () => {
         init: { method: "DELETE" },
       });
     });
+  });
+
+  it("requires confirmation before clearing the tenant's run history", async () => {
+    const { calls } = renderStudio();
+    fireEvent.click(screen.getByRole("button", { name: "Clear demo history" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(calls).not.toContainEqual(
+      expect.objectContaining({ path: "/runs/history" }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear history" }));
+
+    await waitFor(() => {
+      expect(calls).toContainEqual({
+        path: "/runs/history",
+        init: { method: "DELETE" },
+      });
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "2 runs and notifications cleared.",
+    );
   });
 });

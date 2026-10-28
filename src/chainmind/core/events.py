@@ -24,6 +24,9 @@ class RunStore(Protocol):
     def list(self) -> list[DisruptionRun]:
         """Return run snapshots newest first."""
 
+    def delete_tenant(self, tenant_id: str) -> int:
+        """Delete all runs and idempotency keys owned by a tenant."""
+
 
 class EventStore:
     """Thread-safe local run store; replaceable by DynamoDB in AWS deployments."""
@@ -64,6 +67,16 @@ class EventStore:
             run_id = self._keys.get((tenant_id, key))
             run = self._runs.get(run_id) if run_id else None
             return run.model_copy(deep=True) if run else None
+
+    def delete_tenant(self, tenant_id: str) -> int:
+        with self._lock:
+            run_ids = {run_id for run_id, run in self._runs.items() if run.tenant_id == tenant_id}
+            for run_id in run_ids:
+                del self._runs[run_id]
+            self._keys = {
+                key: run_id for key, run_id in self._keys.items() if run_id not in run_ids
+            }
+            return len(run_ids)
 
 
 class SQLiteEventStore:
@@ -147,6 +160,20 @@ class SQLiteEventStore:
                 "SELECT run_data FROM runs ORDER BY created_at DESC"
             ).fetchall()
         return [DisruptionRun.model_validate_json(row["run_data"]) for row in rows]
+
+    def delete_tenant(self, tenant_id: str) -> int:
+        with self._lock, self._connection:
+            rows = self._connection.execute("SELECT run_id, run_data FROM runs").fetchall()
+            run_ids = [
+                row["run_id"]
+                for row in rows
+                if DisruptionRun.model_validate_json(row["run_data"]).tenant_id == tenant_id
+            ]
+            self._connection.executemany(
+                "DELETE FROM runs WHERE run_id = ?",
+                ((run_id,) for run_id in run_ids),
+            )
+            return len(run_ids)
 
     def close(self) -> None:
         """Close the underlying SQLite connection."""

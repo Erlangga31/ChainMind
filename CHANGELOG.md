@@ -2,6 +2,21 @@
 
 Notable user-facing changes are recorded here. This project follows semantic versioning.
 
+## [1.1.1] - 2026-10-28
+
+### Added
+
+- Bilingual welcome and sign-in entry screens with light/dark, large-text and high-contrast controls.
+- Styled sandbox identity-provider page with accessible credential errors and responsive layout.
+- Grouped, filterable notifications with distinct unread counts and tenant-scoped demo-history cleanup.
+- Entry-screen accessibility/viewport coverage and screenshots for Indonesian/English light/dark themes.
+
+### Verification boundaries
+
+- Welcome and identity-provider screens are part of the local mock experience; the identity provider is not SAP IAS.
+- Notification history cleanup is tenant-scoped and audited; it does not remove master data.
+- AWS and SAP remain simulated; no live service deployment or transaction is implied.
+
 ## [1.1.0] - 2026-10-24
 
 ### Added

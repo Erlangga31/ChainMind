@@ -41,6 +41,7 @@ def content(language: str) -> tuple[SlideContent, ...]:
                     "Membantu tim manufaktur merespons gangguan pasokan dengan cepat dan terukur.",
                 ),
                 "Pembuka: ChainMind mengubah sinyal gangguan pasokan menjadi rekomendasi yang dapat ditinjau manusia. Demo berjalan dengan fixture dan sandbox lokal.",
+                "docs/screenshots/welcome-id-light.png",
             ),
             SlideContent(
                 "Masalah: buffer habis sebelum respons tiba",
@@ -50,6 +51,7 @@ def content(language: str) -> tuple[SlideContent, ...]:
                     "Pencarian vendor, analisis stok, dan keputusan sering tersebar lintas sistem.",
                 ),
                 "Jelaskan risiko dua hari stockout sebagai hasil fixture demo, bukan prediksi produksi.",
+                "docs/screenshots/login-id-light.png",
             ),
             SlideContent(
                 "Mengapa AWS dan SAP",
@@ -59,6 +61,7 @@ def content(language: str) -> tuple[SlideContent, ...]:
                     "Integrasi produksi melalui BTP dan Integration Suite adalah target, bukan koneksi yang aktif di demo.",
                 ),
                 "Tekankan pembagian system-of-record (SAP) dan system-of-action (ChainMind).",
+                "docs/screenshots/idp-id-light.png",
             ),
             SlideContent(
                 "Arsitektur dan alur",
@@ -132,7 +135,7 @@ def content(language: str) -> tuple[SlideContent, ...]:
                 "Verifikasi dan batas klaim",
                 (
                     "SAP sandbox simulating S/4HANA OData and Ariba; AWS verified with LocalStack and cdk synth.",
-                    "Backend 163 passed / 9 skipped; Vitest 18 passed; Playwright 11 passed.",
+                    "Validasi terbaru dan batas cakupannya tercatat di docs/COVERAGE.md.",
                     "Tidak ada deployment AWS atau koneksi tenant SAP nyata.",
                 ),
                 "Gunakan klaim persis seperti tertulis; LocalStack dan CDK synth bukan verifikasi akun AWS produksi.",
@@ -146,6 +149,7 @@ def content(language: str) -> tuple[SlideContent, ...]:
                 "Human-approved supply-chain response for manufacturing.",
             ),
             "Opening: ChainMind turns disruption signals into recommendations that a human can review. This demo uses local fixtures and sandboxes.",
+            "docs/screenshots/welcome-en-light.png",
         ),
         SlideContent(
             "Problem: the buffer runs out before the response arrives",
@@ -155,6 +159,7 @@ def content(language: str) -> tuple[SlideContent, ...]:
                 "Supplier search, inventory analysis, and decisions are fragmented across systems.",
             ),
             "Explain the two stockout days as a demo-fixture result, not a production forecast.",
+            "docs/screenshots/login-en-light.png",
         ),
         SlideContent(
             "Why AWS and SAP",
@@ -164,6 +169,7 @@ def content(language: str) -> tuple[SlideContent, ...]:
                 "Production integration through BTP and Integration Suite is a target, not active connectivity in this demo.",
             ),
             "Describe SAP as system of record and ChainMind as a system of action.",
+            "docs/screenshots/idp-en-light.png",
         ),
         SlideContent(
             "Architecture and flow",
@@ -237,7 +243,7 @@ def content(language: str) -> tuple[SlideContent, ...]:
             "Verification and honest scope",
             (
                 "SAP sandbox simulating S/4HANA OData and Ariba; AWS verified with LocalStack and cdk synth.",
-                "Backend 163 passed / 9 skipped; Vitest 18 passed; Playwright 11 passed.",
+                "Current validation results and boundaries are recorded in docs/COVERAGE.md.",
                 "No AWS deployment or live SAP tenant connection was performed.",
             ),
             "Use the exact claim shown. LocalStack and CDK synthesis do not mean production AWS verification.",

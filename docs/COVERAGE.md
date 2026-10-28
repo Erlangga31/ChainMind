@@ -103,12 +103,13 @@ Bedrock, Cognito/IAS, Teams/Slack/SES, SAP, atau SAP BTP telah diverifikasi seca
 
 ## Validasi dan batas deployment
 
-Validasi lokal setelah perubahan Phase 27–29: backend pytest **163 passed, 9 skipped** (suite
-opt-in LocalStack/live SAP dilewati); dashboard Vitest **18 passed**; Playwright **11 passed**,
-termasuk approve/viewer, scenario, presenter, replay, axe, dan tinggi dokumen pada 375px / 1280px.
-Production build dan browser-test typecheck lulus. Ruff, CDK synth, dan CI untuk perubahan rilis
-harus dicatat dari validasi branch/Actions terbaru sebelum merge; status commit `b185ba6` adalah
-bukti historis untuk versi sebelumnya saja.
+Validasi lokal setelah perubahan Phase 30–34: backend pytest **169 passed, 9 skipped** (tes
+opt-in LocalStack/live SAP dilewati); dashboard Vitest **31 passed**; Playwright **15 passed**,
+termasuk approve/viewer, notifications/history cleanup, scenario, presenter, replay, axe, entry
+screens ID/EN light/dark, dan tinggi dokumen pada 375px / 1280px. Production build dan
+browser-test typecheck lulus. Ruff check/format lulus. CDK synthesis dijalankan secara lokal dan
+CI branch harus dikonfirmasi dari run terbaru sebelum merge; hasil ini tidak membuktikan deploy
+atau koneksi AWS/SAP nyata.
 
 CDK synth menargetkan Python 3.12 Linux x86_64 dan memaketkan dependencies. Synthesis tidak
 membuktikan asset dijalankan Lambda. Suppressions cdk-nag yang ada memiliki alasan tertulis; review

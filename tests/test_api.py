@@ -122,6 +122,69 @@ def test_validation_and_health_responses_are_structured() -> None:
     assert response.json()["code"] == "validation_error"
 
 
+def test_presenter_idempotency_key_reuses_the_existing_run() -> None:
+    event = {
+        "title": "Presenter weather delay",
+        "description": "The deterministic presenter scenario repeats.",
+        "component_id": "microchip-x",
+        "component_name": "Microchip X",
+        "delay_days": 5,
+    }
+    headers = {"Idempotency-Key": "presenter-demo-weather-v1"}
+
+    first = client.post("/disruptions", json=event, headers=headers)
+    second = client.post("/disruptions", json=event, headers=headers)
+
+    assert first.status_code == second.status_code == 201
+    assert first.json()["run_id"] == second.json()["run_id"]
+    assert len(client.get("/runs").json()) == 1
+
+
+def test_clear_run_history_is_approver_only_tenant_scoped_and_audited() -> None:
+    event = {
+        "title": "Tenant run",
+        "description": "A tenant-specific disruption for clear-history testing.",
+        "component_id": "microchip-x",
+        "component_name": "Microchip X",
+        "delay_days": 5,
+    }
+    client.post(
+        "/disruptions",
+        json=event,
+        headers={"Authorization": "Bearer test-viewer:tenant-a"},
+    )
+    client.post(
+        "/disruptions",
+        json=event,
+        headers={"Authorization": "Bearer test-viewer:tenant-b"},
+    )
+
+    denied = client.delete(
+        "/runs/history",
+        headers={"Authorization": "Bearer test-viewer:tenant-a"},
+    )
+    cleared = client.delete(
+        "/runs/history",
+        headers={"Authorization": "Bearer test-approver:tenant-a"},
+    )
+
+    assert denied.status_code == 403
+    assert cleared.status_code == 200
+    assert cleared.json() == {"deleted_runs": 1}
+    assert (
+        client.get("/runs", headers={"Authorization": "Bearer test-viewer:tenant-a"}).json() == []
+    )
+    assert (
+        len(client.get("/runs", headers={"Authorization": "Bearer test-viewer:tenant-b"}).json())
+        == 1
+    )
+    audit = client.get(
+        "/data/audit",
+        headers={"Authorization": "Bearer test-approver:tenant-a"},
+    ).json()
+    assert any(entry["action"] == "clear" and entry["entity"] == "run_history" for entry in audit)
+
+
 def test_master_data_api_validates_crud_import_export_and_tenant_scope() -> None:
     headers = {"Authorization": "Bearer approver:factory-one"}
     material = {
