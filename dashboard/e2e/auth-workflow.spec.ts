@@ -32,7 +32,7 @@ async function signIn(
     .click();
   await page.locator('input[name="username"]').fill(role);
   await page.locator('input[name="password"]').fill("demo");
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.locator('button[type="submit"]').click();
   await expect(page.getByText(`${role} · ${role}`)).toBeVisible();
 }
 

@@ -53,9 +53,10 @@ export function LoginScreen({
   return (
     <main className="entry-page h-[100dvh] min-h-0 overflow-hidden bg-canvas text-ink">
       <header className="relative z-10 flex min-h-16 items-center justify-between gap-3 px-4 py-3 sm:px-7">
-        <button type="button" className="flex items-center gap-3 rounded-lg text-left focus-visible:outline" onClick={onBack} aria-label={t("loginBack")}>
+        <button type="button" className="flex items-center gap-3 rounded-lg text-left focus-visible:outline" onClick={onBack}>
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-teal-400 font-black text-ink">C</span>
           <span className="font-bold tracking-[0.14em]">CHAINMIND</span>
+          <span className="sr-only">{t("loginBack")}</span>
         </button>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <div role="group" aria-label={t("language")} className="flex gap-1">

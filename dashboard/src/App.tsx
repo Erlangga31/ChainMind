@@ -140,7 +140,7 @@ function randomBase64Url(size: number): string {
     .replace(/=+$/g, "");
 }
 
-async function beginLogin(): Promise<void> {
+async function beginLogin(language: Language): Promise<void> {
   if (new URLSearchParams(window.location.search).get("presenter") === "1") {
     sessionStorage.setItem("chainmind.presenter", "true");
   } else {
@@ -162,6 +162,7 @@ async function beginLogin(): Promise<void> {
     response_type: "code",
     client_id: OIDC_CLIENT_ID,
     redirect_uri: OIDC_REDIRECT_URI,
+    ui_locales: language,
     scope: "openid profile",
     state,
     nonce,
@@ -711,7 +712,7 @@ export default function App() {
     setLoginStarting(true);
     setError("");
     try {
-      await beginLogin();
+      await beginLogin(language);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not start sign-in.");
       setLoginStarting(false);

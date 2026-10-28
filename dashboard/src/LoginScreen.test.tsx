@@ -42,7 +42,7 @@ describe("Login screen", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("Identity provider is unavailable.");
     expect(screen.getByRole("button", { name: "Menghubungkan ke penyedia identitas…" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Kembali ke sambutan" }));
+    fireEvent.click(screen.getByRole("button", { name: "← Kembali ke sambutan" }));
     expect(onBack).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Menghubungkan ke penyedia identitas…" }));
     expect(onSignIn).not.toHaveBeenCalled();
