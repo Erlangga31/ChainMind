@@ -14,6 +14,9 @@ async function signIn(
     .getByRole("group")
     .getByRole("button", { name: language === "id" ? "ID" : "EN" })
     .click();
+  if (!presenter) {
+    await page.getByRole("button", { name: language === "id" ? "Mulai" : "Get started" }).click();
+  }
   if (role === "approver") {
     const screenshotDirectory = resolve(process.cwd(), "../docs/screenshots");
     mkdirSync(screenshotDirectory, { recursive: true });

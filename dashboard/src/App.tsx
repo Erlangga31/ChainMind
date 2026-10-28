@@ -10,6 +10,7 @@ import {
 } from "./components";
 import { FlowDiagram } from "./FlowDiagram";
 import { DataStudio } from "./DataStudio";
+import { WelcomeScreen } from "./Welcome";
 import type { ApiError, DisruptionRun, KPIReport, UsageReport } from "./types";
 import { formatNotification, translate, type Language } from "./i18n";
 
@@ -261,6 +262,13 @@ export default function App() {
     () => localStorage.getItem("chainmind.theme") === "dark",
   );
   const [session, setSession] = useState<AuthSession | null>(null);
+  const [entryStep, setEntryStep] = useState<"welcome" | "login">(() =>
+    presenter ||
+    new URLSearchParams(window.location.search).has("code") ||
+    sessionStorage.getItem("chainmind.welcome.seen") === "true"
+      ? "login"
+      : "welcome",
+  );
   const [runs, setRuns] = useState<DisruptionRun[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [run, setRun] = useState<DisruptionRun | null>(null);
@@ -698,6 +706,24 @@ export default function App() {
   ];
 
   if (!session) {
+    if (entryStep === "welcome") {
+      return (
+        <WelcomeScreen
+          language={language}
+          darkTheme={darkTheme}
+          largeText={largeText}
+          highContrast={highContrast}
+          onLanguageChange={setLanguage}
+          onThemeChange={() => setDarkTheme((value) => !value)}
+          onLargeTextChange={() => setLargeText((value) => !value)}
+          onHighContrastChange={() => setHighContrast((value) => !value)}
+          onGetStarted={() => {
+            sessionStorage.setItem("chainmind.welcome.seen", "true");
+            setEntryStep("login");
+          }}
+        />
+      );
+    }
     return (
       <main className="grid min-h-screen place-items-center bg-canvas p-6">
         <section className="w-full max-w-md rounded-3xl bg-white p-8 shadow-card">
