@@ -65,7 +65,7 @@ export function LoginScreen({
             ))}
           </div>
           <button type="button" aria-label={t("welcomeTheme")} aria-pressed={darkTheme} onClick={onThemeChange} className="entry-tool-button">{darkTheme ? "☀" : "☾"}</button>
-          <button type="button" aria-label={t("largeText")} aria-pressed={largeText} onClick={onLargeTextChange} className="entry-tool-button">A+</button>
+          <button type="button" aria-label={`${t("largeText")} A+`} aria-pressed={largeText} onClick={onLargeTextChange} className="entry-tool-button">A+</button>
           <button type="button" aria-label={t("highContrast")} aria-pressed={highContrast} onClick={onHighContrastChange} className="entry-tool-button">◐</button>
         </div>
       </header>

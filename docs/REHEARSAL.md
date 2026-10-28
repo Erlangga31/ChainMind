@@ -4,13 +4,17 @@
 
 - [ ] Pastikan laptop tersambung listrik dan browser pada zoom 100% (atau presenter mode).
 - [ ] Jalankan `.\scripts\run_all.ps1`; tunggu semua pemeriksaan preflight dan health check lulus.
-- [ ] Buka `http://127.0.0.1:5173/?presenter=1`.
-- [ ] Login `approver` / `demo`; periksa bahasa Indonesia dan halaman Flow.
+- [ ] Buka `http://127.0.0.1:5173/`; periksa halaman sambutan dalam bahasa Indonesia dan mode terang.
+- [ ] Pilih **Mulai**, lalu **Masuk dengan ChainMind SSO**; halaman sandbox harus menampilkan label
+      User/Password dan footer bahwa ini bukan SAP IAS asli.
+- [ ] Login `approver` / `demo`; periksa halaman Flow. Untuk auto-run, buka
+      `http://127.0.0.1:5173/?presenter=1` sebelum login.
 - [ ] Periksa nilai skenario: delay 5 hari, coverage 3 hari, Vendor B, 2 hari, $135.000,
       Air Freight, dan `PENDING_APPROVAL`.
 - [ ] Pastikan halaman KPI menyebut nilai ilustratif; jangan presentasikan sebagai hasil produksi.
-- [ ] Siapkan screenshot cadangan dari [`screenshots/`](./screenshots/), termasuk `flow-id.png`,
-      `flow-en.png`, `po-approval-id.png`, dan `po-approval.png`.
+- [ ] Siapkan screenshot cadangan dari [`screenshots/`](./screenshots/), termasuk
+      `welcome-id-light.png`, `login-id-light.png`, `idp-id-light.png`, `flow-id.png`, `flow-en.png`,
+      `po-approval-id.png`, dan `po-approval.png`.
 - [ ] Cetak atau buka [QNA.md](./QNA.md) dan [VIDEO_SCRIPT.md](./VIDEO_SCRIPT.md).
 - [ ] Siapkan terminal launcher agar mudah dihentikan dengan `Ctrl+C`.
 

@@ -343,6 +343,121 @@ test("dashboard fits projector and mobile viewports with bilingual light and dar
   expect(mobileDimensions.scrollWidth).toBeLessThanOrEqual(mobileDimensions.clientWidth + 1);
 });
 
+test("welcome, login, and sandbox IdP are accessible in Indonesian and English light/dark themes", async ({ page }) => {
+  const screenshotDirectory = resolve(process.cwd(), "../docs/screenshots");
+  mkdirSync(screenshotDirectory, { recursive: true });
+
+  for (const language of ["id", "en"] as const) {
+    for (const theme of ["light", "dark"] as const) {
+      await page.addInitScript(
+        ({ selectedLanguage, selectedTheme }) => {
+          localStorage.setItem("chainmind.language", selectedLanguage);
+          localStorage.setItem("chainmind.theme", selectedTheme);
+          localStorage.setItem("chainmind.largeText", "false");
+          localStorage.setItem("chainmind.highContrast", "false");
+          sessionStorage.removeItem("chainmind.welcome.seen");
+        },
+        { selectedLanguage: language, selectedTheme: theme },
+      );
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await page.goto("/");
+
+      const welcomeButton = language === "id" ? "Mulai" : "Get started";
+      const loginButton = language === "id"
+        ? "Masuk dengan ChainMind SSO"
+        : "Sign in with ChainMind SSO";
+      const themeSlug = `${language}-${theme}`;
+      const assertNoDocumentScroll = async () => {
+        const dimensions = await page.evaluate(() => {
+          const element = document.scrollingElement;
+          return {
+            clientHeight: element?.clientHeight ?? 0,
+            scrollHeight: element?.scrollHeight ?? 0,
+            clientWidth: element?.clientWidth ?? 0,
+            scrollWidth: element?.scrollWidth ?? 0,
+          };
+        });
+        expect(dimensions.scrollHeight).toBeLessThanOrEqual(dimensions.clientHeight + 1);
+        expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth + 1);
+      };
+      const assertAxeClean = async () => {
+        const results = await new AxeBuilder({ page }).analyze();
+        expect(results.violations).toEqual([]);
+      };
+
+      await expect(page.getByRole("button", { name: welcomeButton })).toBeVisible();
+      await assertNoDocumentScroll();
+      await assertAxeClean();
+      await page.screenshot({
+        path: resolve(screenshotDirectory, `welcome-${themeSlug}.png`),
+      });
+
+      await page.getByRole("button", { name: welcomeButton }).click();
+      await expect(page.getByRole("button", { name: loginButton })).toBeVisible();
+      await assertNoDocumentScroll();
+      await assertAxeClean();
+      await page.screenshot({
+        path: resolve(screenshotDirectory, `login-${themeSlug}.png`),
+      });
+
+      await page.getByRole("button", { name: loginButton }).click();
+      await expect(page.locator("body")).toHaveAttribute("data-theme", theme);
+      await expect(page.locator("body")).toHaveAttribute("data-text-scale", "normal");
+      await expect(page.locator("body")).toHaveAttribute("data-contrast", "standard");
+      await expect(page.getByRole("heading", {
+        name: language === "id" ? "Masuk ke ChainMind" : "Sign in to ChainMind",
+      })).toBeVisible();
+      await assertNoDocumentScroll();
+      await assertAxeClean();
+      await page.screenshot({
+        path: resolve(screenshotDirectory, `idp-${themeSlug}.png`),
+      });
+    }
+  }
+});
+
+test("entry screens fit mobile with large text/high contrast and wrong IdP credentials show a generic error", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("chainmind.language", "id");
+    localStorage.setItem("chainmind.theme", "dark");
+    localStorage.setItem("chainmind.largeText", "true");
+    localStorage.setItem("chainmind.highContrast", "true");
+  });
+  await page.setViewportSize({ width: 375, height: 667 });
+
+  const assertNoVerticalDocumentScroll = async () => {
+    const dimensions = await page.evaluate(() => {
+      const element = document.scrollingElement;
+      return {
+        clientHeight: element?.clientHeight ?? 0,
+        scrollHeight: element?.scrollHeight ?? 0,
+      };
+    });
+    expect(dimensions.scrollHeight).toBeLessThanOrEqual(dimensions.clientHeight + 1);
+  };
+
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Mulai" })).toBeVisible();
+  await assertNoVerticalDocumentScroll();
+  await page.getByRole("button", { name: "Mulai" }).click();
+  await expect(page.getByRole("button", { name: "Masuk dengan ChainMind SSO" })).toBeVisible();
+  await assertNoVerticalDocumentScroll();
+  await page.getByRole("button", { name: "Masuk dengan ChainMind SSO" }).click();
+  await expect(page.locator("body")).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator("body")).toHaveAttribute("data-text-scale", "large");
+  await expect(page.locator("body")).toHaveAttribute("data-contrast", "high");
+  await assertNoVerticalDocumentScroll();
+
+  await page.locator('input[name="username"]').fill("approver");
+  await page.locator('input[name="password"]').fill("incorrect-password");
+  await page.locator('button[type="submit"]').click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Gagal masuk. Periksa nama pengguna dan kata sandi, lalu coba lagi.",
+  );
+  await expect(page.locator("body")).toHaveAttribute("data-theme", "dark");
+  await assertNoVerticalDocumentScroll();
+});
+
 for (const [id, title] of [
   ["geopolitical", "Geopolitical disruption delays component supply"],
   ["vendor_failure", "Primary vendor reports a supply failure"],

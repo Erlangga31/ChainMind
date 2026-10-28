@@ -27,6 +27,9 @@ def _login_page(
     language: str,
     username: str = "",
     error: bool = False,
+    color_scheme: str = "system",
+    large_text: bool = False,
+    high_contrast: bool = False,
 ) -> str:
     is_english = language == "en"
     title = "Sign in to ChainMind" if is_english else "Masuk ke ChainMind"
@@ -62,6 +65,9 @@ def _login_page(
     )
     safe_username = html.escape(username, quote=True)
     safe_language = "en" if is_english else "id"
+    safe_color_scheme = color_scheme if color_scheme in {"light", "dark"} else "system"
+    text_scale = "large" if large_text else "normal"
+    contrast = "high" if high_contrast else "standard"
     return f"""<!doctype html>
 <html lang="{safe_language}">
 <head>
@@ -72,8 +78,8 @@ def _login_page(
   <style>
     :root {{ font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; color: #172235; background: #edf3f7; font-synthesis: none; text-rendering: optimizeLegibility; }}
     * {{ box-sizing: border-box; }}
-    body {{ min-width: 320px; min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 28px 16px; background: radial-gradient(ellipse at 82% 15%, rgba(45,212,191,.20), transparent 34%), radial-gradient(ellipse at 12% 90%, rgba(56,189,248,.15), transparent 35%), #edf3f7; }}
-    main {{ width: min(100%, 450px); }}
+    body {{ min-width: 320px; min-height: 100vh; height: 100dvh; margin: 0; display: grid; place-items: center; overflow: hidden; padding: 28px 16px; background: radial-gradient(ellipse at 82% 15%, rgba(45,212,191,.20), transparent 34%), radial-gradient(ellipse at 12% 90%, rgba(56,189,248,.15), transparent 35%), #edf3f7; }}
+    main {{ width: min(100%, 450px); max-height: 100%; overflow-y: auto; padding: 4px; }}
     .brand {{ display: flex; align-items: center; gap: 12px; margin: 0 0 20px 4px; color: #172235; font-size: 13px; font-weight: 850; letter-spacing: .16em; }}
     .mark {{ display: grid; width: 42px; height: 42px; place-items: center; border-radius: 13px; background: #2dd4bf; color: #10243a; font-size: 19px; box-shadow: 0 7px 22px rgba(15,118,110,.2); }}
     .card {{ border: 1px solid rgba(255,255,255,.82); border-radius: 26px; padding: clamp(24px, 6vw, 40px); background: rgba(255,255,255,.84); box-shadow: 0 24px 70px rgba(15,35,55,.14); backdrop-filter: blur(16px); }}
@@ -107,10 +113,38 @@ def _login_page(
       .chip {{ border-color: #115e59; background: #123a3a; color: #ccfbf1; }}
       .error {{ border-color: #9f1239; background: #3b1020; color: #ffe4e6; }}
     }}
+    body[data-theme="dark"] {{ background: radial-gradient(ellipse at 82% 15%, rgba(13,148,136,.24), transparent 34%), #0b1220; color: #e2e8f0; }}
+    body[data-theme="dark"] .brand, body[data-theme="dark"] h1 {{ color: #f1f5f9; }}
+    body[data-theme="dark"] .card {{ border-color: #334155; background: rgba(17,30,48,.9); }}
+    body[data-theme="dark"] .subtitle, body[data-theme="dark"] .quick span, body[data-theme="dark"] footer {{ color: #cbd5e1; }}
+    body[data-theme="dark"] label {{ color: #e2e8f0; }}
+    body[data-theme="dark"] input {{ border-color: #475569; background: #0b1220; color: #e2e8f0; }}
+    body[data-theme="dark"] .show {{ border-color: #475569; background: #172235; color: #e2e8f0; }}
+    body[data-theme="dark"] .chip {{ border-color: #115e59; background: #123a3a; color: #ccfbf1; }}
+    @media (prefers-color-scheme: dark) {{
+      body[data-theme="light"] {{ background: radial-gradient(ellipse at 82% 15%, rgba(45,212,191,.20), transparent 34%), radial-gradient(ellipse at 12% 90%, rgba(56,189,248,.15), transparent 35%), #edf3f7; color: #172235; }}
+      body[data-theme="light"] .brand, body[data-theme="light"] h1 {{ color: #172235; }}
+      body[data-theme="light"] .card {{ border-color: rgba(255,255,255,.82); background: rgba(255,255,255,.84); }}
+      body[data-theme="light"] .subtitle, body[data-theme="light"] .quick span, body[data-theme="light"] footer {{ color: #526174; }}
+      body[data-theme="light"] label {{ color: #28374a; }}
+      body[data-theme="light"] input {{ border-color: #cbd5e1; background: #fff; color: #172235; }}
+      body[data-theme="light"] .show {{ border-color: #cbd5e1; background: #f8fafc; color: #26364a; }}
+      body[data-theme="light"] .chip {{ border-color: #99f6e4; background: #f0fdfa; color: #115e59; }}
+    }}
+    body[data-text-scale="large"] h1 {{ font-size: clamp(30px, 8vw, 40px); }}
+    body[data-text-scale="large"] .subtitle, body[data-text-scale="large"] label, body[data-text-scale="large"] input, body[data-text-scale="large"] button, body[data-text-scale="large"] footer {{ font-size: 1.08em; }}
+    body[data-contrast="high"] {{ background: #000; color: #fff; }}
+    body[data-contrast="high"] .brand, body[data-contrast="high"] h1 {{ color: #fff; }}
+    body[data-contrast="high"] .card {{ border: 2px solid #fff; background: #000; box-shadow: none; }}
+    body[data-contrast="high"] .subtitle, body[data-contrast="high"] .quick span, body[data-contrast="high"] footer, body[data-contrast="high"] label {{ color: #fff; }}
+    body[data-contrast="high"] input {{ border: 2px solid #fff; background: #000; color: #fff; }}
+    body[data-contrast="high"] .show, body[data-contrast="high"] .chip {{ border: 2px solid #fff; background: #000; color: #fff; }}
+    body[data-contrast="high"] .primary {{ border: 2px solid #fff; background: #00665e; color: #fff; }}
+    body[data-contrast="high"] .error {{ border: 2px solid #fff; background: #300; color: #fff; }}
     @media (prefers-reduced-motion: reduce) {{ *, *::before, *::after {{ scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }} }}
   </style>
 </head>
-<body>
+<body data-theme="{safe_color_scheme}" data-text-scale="{text_scale}" data-contrast="{contrast}">
   <main>
     <div class="brand"><span class="mark" aria-hidden="true">C</span><span>CHAINMIND</span></div>
     <section class="card" aria-labelledby="page-title">
@@ -226,6 +260,9 @@ def add_oidc_routes(
         code_challenge: str,
         code_challenge_method: str,
         ui_locales: str = "id",
+        color_scheme: str = "system",
+        text_scale: str = "normal",
+        contrast: str = "standard",
     ) -> Response:
         if (
             response_type != "code"
@@ -244,8 +281,19 @@ def add_oidc_routes(
             "nonce": nonce,
             "code_challenge": code_challenge,
             "ui_locales": language,
+            "color_scheme": color_scheme if color_scheme in {"light", "dark"} else "system",
+            "text_scale": text_scale if text_scale in {"normal", "large"} else "normal",
+            "contrast": contrast if contrast in {"standard", "high"} else "standard",
         }
-        return HTMLResponse(_login_page(hidden_fields, language=language))
+        return HTMLResponse(
+            _login_page(
+                hidden_fields,
+                language=language,
+                color_scheme=hidden_fields["color_scheme"],
+                large_text=hidden_fields["text_scale"] == "large",
+                high_contrast=hidden_fields["contrast"] == "high",
+            )
+        )
 
     @app.post("/oidc/login")
     async def login(request: Request) -> Response:
@@ -256,7 +304,16 @@ def add_oidc_routes(
         }
         hidden_fields = {
             key: fields.get(key, "")
-            for key in ("client_id", "redirect_uri", "state", "nonce", "code_challenge")
+            for key in (
+                "client_id",
+                "redirect_uri",
+                "state",
+                "nonce",
+                "code_challenge",
+                "color_scheme",
+                "text_scale",
+                "contrast",
+            )
         }
         language = "en" if fields.get("ui_locales") == "en" else "id"
         hidden_fields["ui_locales"] = language
@@ -268,6 +325,9 @@ def add_oidc_routes(
                     language=language,
                     username=fields.get("username", ""),
                     error=True,
+                    color_scheme=hidden_fields["color_scheme"],
+                    large_text=hidden_fields["text_scale"] == "large",
+                    high_contrast=hidden_fields["contrast"] == "high",
                 ),
                 status_code=401,
             )

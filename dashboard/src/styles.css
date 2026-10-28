@@ -154,6 +154,15 @@ body {
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.34);
 }
 
+:root[data-theme="dark"] .entry-login-panel [class~="bg-white/75"] {
+  border-color: #475569;
+  background: rgba(17, 30, 48, 0.96);
+}
+
+:root[data-theme="dark"] .entry-login-panel .text-ink {
+  color: #f1f5f9 !important;
+}
+
 :root[data-theme="dark"] .entry-page .text-teal-800,
 :root[data-theme="dark"] .entry-page .text-teal-700 {
   color: #99f6e4 !important;
@@ -190,6 +199,30 @@ body {
   border: 3px solid currentColor;
   background: #fff !important;
   color: #000 !important;
+}
+
+:root[data-contrast="high"] .entry-login-panel [class~="bg-white/75"] {
+  border-color: #000 !important;
+  background: #fff !important;
+}
+
+:root[data-contrast="high"] .entry-login-panel .text-ink,
+:root[data-contrast="high"] .entry-login-panel .text-slate-600,
+:root[data-contrast="high"] .entry-login-panel .text-slate-300,
+:root[data-contrast="high"] .entry-login-panel .text-slate-500 {
+  color: #000 !important;
+}
+
+:root[data-contrast="high"][data-theme="dark"] .entry-login-panel [class~="bg-white/75"] {
+  border-color: #fff !important;
+  background: #000 !important;
+}
+
+:root[data-contrast="high"][data-theme="dark"] .entry-login-panel .text-ink,
+:root[data-contrast="high"][data-theme="dark"] .entry-login-panel .text-slate-600,
+:root[data-contrast="high"][data-theme="dark"] .entry-login-panel .text-slate-300,
+:root[data-contrast="high"][data-theme="dark"] .entry-login-panel .text-slate-500 {
+  color: #fff !important;
 }
 
 .entry-page :focus-visible {

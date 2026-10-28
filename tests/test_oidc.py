@@ -138,6 +138,9 @@ def test_oidc_rejects_invalid_credentials_and_pkce_verifiers() -> None:
             "nonce": "nonce",
             "code_challenge": "A" * 43,
             "code_challenge_method": "S256",
+            "color_scheme": "dark",
+            "text_scale": "large",
+            "contrast": "high",
         },
     )
     assert bad_authorize.status_code == 200
@@ -174,7 +177,20 @@ def test_oidc_sign_in_page_has_accessible_form_and_escaped_hidden_values() -> No
     assert response.status_code == 200
     assert "<title>Masuk ke ChainMind</title>" in response.text
     assert "Identity provider (sandbox) — meniru SAP BTP IAS" in response.text
-    for field in ("client_id", "redirect_uri", "state", "nonce", "code_challenge", "ui_locales"):
+    assert 'data-theme="dark"' in response.text
+    assert 'data-text-scale="large"' in response.text
+    assert 'data-contrast="high"' in response.text
+    for field in (
+        "client_id",
+        "redirect_uri",
+        "state",
+        "nonce",
+        "code_challenge",
+        "ui_locales",
+        "color_scheme",
+        "text_scale",
+        "contrast",
+    ):
         assert (
             f'name="{field}" type="hidden"' in response.text
             or f'type="hidden" name="{field}"' in response.text
@@ -187,6 +203,35 @@ def test_oidc_sign_in_page_has_accessible_form_and_escaped_hidden_values() -> No
     assert injected_state not in response.text
     assert "&quot;&gt;&lt;img src=x onerror=alert(1)&gt;" in response.text
     assert "https://" not in response.text
+
+
+def test_oidc_sign_in_error_escapes_username_and_preserves_display_preferences() -> None:
+    client = TestClient(create_app(SandboxSettings()))
+    injected_username = '"><img src=x onerror=alert(1)>'
+    response = client.post(
+        "/oidc/login",
+        data={
+            "username": injected_username,
+            "password": "wrong",
+            "client_id": "chainmind-dashboard",
+            "redirect_uri": "http://localhost:5173/",
+            "state": "state-value",
+            "nonce": "nonce-value",
+            "code_challenge": "A" * 43,
+            "ui_locales": "en",
+            "color_scheme": "dark",
+            "text_scale": "large",
+            "contrast": "high",
+        },
+    )
+
+    assert response.status_code == 401
+    assert injected_username not in response.text
+    assert "&quot;&gt;&lt;img src=x onerror=alert(1)&gt;" in response.text
+    assert 'data-theme="dark"' in response.text
+    assert 'data-text-scale="large"' in response.text
+    assert 'data-contrast="high"' in response.text
+    assert 'name="state" value="state-value"' in response.text
 
 
 def test_oidc_invalid_credentials_render_the_same_generic_error_without_user_enumeration() -> None:

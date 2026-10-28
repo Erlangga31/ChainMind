@@ -48,7 +48,7 @@ describe("Welcome screen", () => {
     expect(screen.getByText(/harus ditinjau dan disetujui manusia/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Ganti tema terang atau gelap" }));
-    fireEvent.click(screen.getByRole("button", { name: "Teks lebih besar" }));
+    fireEvent.click(screen.getByRole("button", { name: /Teks lebih besar/ }));
     fireEvent.click(screen.getByRole("button", { name: "Kontras tinggi" }));
     fireEvent.click(screen.getByRole("button", { name: "EN" }));
     expect(controls.onThemeChange).toHaveBeenCalledOnce();

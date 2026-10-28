@@ -17,9 +17,13 @@ Durasi yang disarankan: **5 menit**. Jalur presentasi memakai preset determinist
 2. Dari root, jalankan `.\scripts\run_all.ps1` (Windows) atau `uv run python scripts/run_all.py`.
    Launcher menjalankan `scripts/preflight.py` lebih dulu untuk memeriksa port, versi Python/Node,
    dependensi lokal, fixture, dan akun demo OIDC; semua pemeriksaan bersifat lokal.
-3. Tunggu pesan siap, lalu buka `http://127.0.0.1:5173`. API, sandbox SAP/OIDC, dan Vite berjalan lokal dalam mock mode; tidak membutuhkan AWS/SAP atau akses internet saat demo.
-4. Masuk sebagai `approver` dengan password `demo`. Bahasa awal dashboard Indonesia; kontrol `EN`
-   mengganti dashboard ke Inggris. Ini fake OIDC sandbox, bukan login ke SAP IAS/Cognito produksi.
+3. Tunggu pesan siap, lalu buka `http://127.0.0.1:5173`. Halaman sambutan menyediakan pilihan
+   bahasa, tema, teks besar dan kontras tinggi. Tekan **Mulai**, lalu **Masuk dengan ChainMind SSO**.
+   API, sandbox SAP/OIDC, dan Vite berjalan lokal dalam mock mode; tidak membutuhkan AWS/SAP atau
+   akses internet saat demo.
+4. Di halaman identity-provider sandbox, pilih role demo bila perlu dan masuk sebagai `approver`
+   dengan password `demo`. Bahasa awal adalah Indonesia; pilihan bahasa/tema/accessibility diteruskan
+   ke halaman login sandbox. Ini bukan login ke SAP IAS/Cognito produksi.
 5. Untuk menghentikan semua proses gunakan `Ctrl+C` di terminal launcher.
 
 ## Alur presentasi
@@ -63,6 +67,8 @@ Angka adalah hasil dataset demo dan asumsi mock, bukan penawaran SAP Ariba atau 
 - Untuk presenter, buka `http://127.0.0.1:5173/?presenter=1` sebelum login approver. Setelah login,
   ChainMind otomatis memicu fixture cuaca dan membuka Flow. Tombol **Lanjut / Next** menggerakkan
   narasi enam bagian yang mengikuti urutan naskah ini; mode ini menyembunyikan menu administrasi.
+- Sambutan dilewati pada URL presenter dan setelah dilewati sekali di tab saat ini. Login biasa
+  dimulai dari halaman **Mulai**; tombol kembali membawa pengguna ke sambutan.
 - Jalankan `uv run python scripts/generate_replay_fixture.py` untuk membangun ulang
   `dashboard/public/replay-run.json` dari pipeline mock kanonis. Jangan menyunting hasil JSON secara
   manual; gunakan ulang skrip dan uji `tests/test_replay_fixture.py`.

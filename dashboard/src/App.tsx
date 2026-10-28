@@ -149,7 +149,12 @@ function randomBase64Url(size: number): string {
     .replace(/=+$/g, "");
 }
 
-async function beginLogin(language: Language): Promise<void> {
+async function beginLogin(
+  language: Language,
+  largeText: boolean,
+  highContrast: boolean,
+  darkTheme: boolean,
+): Promise<void> {
   if (new URLSearchParams(window.location.search).get("presenter") === "1") {
     sessionStorage.setItem("chainmind.presenter", "true");
   } else {
@@ -172,6 +177,9 @@ async function beginLogin(language: Language): Promise<void> {
     client_id: OIDC_CLIENT_ID,
     redirect_uri: OIDC_REDIRECT_URI,
     ui_locales: language,
+    text_scale: largeText ? "large" : "normal",
+    contrast: highContrast ? "high" : "standard",
+    color_scheme: darkTheme ? "dark" : "light",
     scope: "openid profile",
     state,
     nonce,
@@ -795,7 +803,7 @@ export default function App() {
     setLoginStarting(true);
     setError("");
     try {
-      await beginLogin(language);
+      await beginLogin(language, largeText, highContrast, darkTheme);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not start sign-in.");
       setLoginStarting(false);

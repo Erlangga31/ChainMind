@@ -36,6 +36,14 @@ AWS LocalStack/CDK synthesis, not production services.
 | --- | --- |
 | ![Dashboard Indonesian light theme](./docs/screenshots/dashboard-id-light.png) | ![Dashboard Indonesian dark theme](./docs/screenshots/dashboard-id-dark.png) |
 
+### Welcome and sign-in previews
+
+| Screen | Indonesia · light | Indonesia · dark | English · light | English · dark |
+| --- | --- | --- | --- | --- |
+| Welcome | ![Sambutan ID terang](./docs/screenshots/welcome-id-light.png) | ![Sambutan ID gelap](./docs/screenshots/welcome-id-dark.png) | ![Welcome EN light](./docs/screenshots/welcome-en-light.png) | ![Welcome EN dark](./docs/screenshots/welcome-en-dark.png) |
+| Dashboard sign-in | ![Login ID terang](./docs/screenshots/login-id-light.png) | ![Login ID gelap](./docs/screenshots/login-id-dark.png) | ![Login EN light](./docs/screenshots/login-en-light.png) | ![Login EN dark](./docs/screenshots/login-en-dark.png) |
+| Sandbox IdP | ![IdP ID terang](./docs/screenshots/idp-id-light.png) | ![IdP ID gelap](./docs/screenshots/idp-id-dark.png) | ![IdP EN light](./docs/screenshots/idp-en-light.png) | ![IdP EN dark](./docs/screenshots/idp-en-dark.png) |
+
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/Dashboard-React-61DAFB?logo=react&logoColor=20232A)](https://react.dev/)
@@ -116,8 +124,10 @@ Dengan Python 3.12, Node.js sesuai versi proyek, dan dependensi yang sudah dipas
 .\scripts\run_all.ps1
 ```
 
-Buka `http://127.0.0.1:5173`, masuk `approver` / `demo`, picu skenario cuaca, lalu tinjau dan
-setujui PO. Panduan: [DEMO](./docs/DEMO.md), [REHEARSAL](./docs/REHEARSAL.md), dan
+Buka `http://127.0.0.1:5173`, pilih **Mulai** → **Masuk dengan ChainMind SSO**, masuk `approver` /
+`demo` di IdP sandbox, picu skenario cuaca, lalu tinjau dan setujui PO. URL `?presenter=1`
+melewati halaman sambutan dan memulai narasi presenter. Panduan: [DEMO](./docs/DEMO.md),
+[REHEARSAL](./docs/REHEARSAL.md), dan
 [Q&A juri](./docs/QNA.md).
 
 Sandbox SAP lokal pada `sandbox/sap_sandbox/` menyediakan endpoint OData V2, metadata EDMX, kontrak JSON Schema di `contracts/sap/`, vendor Ariba, webhook Event Mesh, dan workflow approval simulasi. Uji adapter menggunakan field standar SAP (misalnya `Material`, `Supplier`, `OrderQuantity`, dan `NetPriceAmount`) serta menandai ekstensi `ChainMind*` sebagai custom. Ini adalah contract/sandbox test, bukan koneksi atau tenant SAP produksi. Smoke test tenant opsional didokumentasikan di [DEPLOY.md](./docs/DEPLOY.md); tidak berjalan otomatis dan perlu URL/kredensial SAP yang diberikan pemilik tenant.
