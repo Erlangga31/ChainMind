@@ -10,6 +10,7 @@ import {
 } from "./components";
 import { FlowDiagram } from "./FlowDiagram";
 import { DataStudio } from "./DataStudio";
+import { LoginScreen } from "./LoginScreen";
 import { WelcomeScreen } from "./Welcome";
 import type { ApiError, DisruptionRun, KPIReport, UsageReport } from "./types";
 import { formatNotification, translate, type Language } from "./i18n";
@@ -262,6 +263,7 @@ export default function App() {
     () => localStorage.getItem("chainmind.theme") === "dark",
   );
   const [session, setSession] = useState<AuthSession | null>(null);
+  const [loginStarting, setLoginStarting] = useState(false);
   const [entryStep, setEntryStep] = useState<"welcome" | "login">(() =>
     presenter ||
     new URLSearchParams(window.location.search).has("code") ||
@@ -705,6 +707,26 @@ export default function App() {
       : []),
   ];
 
+  async function startLogin() {
+    setLoginStarting(true);
+    setError("");
+    try {
+      await beginLogin();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not start sign-in.");
+      setLoginStarting(false);
+    }
+  }
+
+  function returnToWelcome() {
+    sessionStorage.removeItem("chainmind.welcome.seen");
+    sessionStorage.removeItem("chainmind.presenter");
+    window.history.replaceState({}, "", window.location.pathname);
+    setError("");
+    setLoginStarting(false);
+    setEntryStep("welcome");
+  }
+
   if (!session) {
     if (entryStep === "welcome") {
       return (
@@ -725,37 +747,21 @@ export default function App() {
       );
     }
     return (
-      <main className="grid min-h-screen place-items-center bg-canvas p-6">
-        <section className="w-full max-w-md rounded-3xl bg-white p-8 shadow-card">
-          <p className="text-sm font-semibold uppercase tracking-widest text-accent">ChainMind SSO</p>
-          <div className="flex items-center justify-between gap-3">
-            <h1 className="mt-2 text-2xl font-bold text-ink">{t("signInTitle")}</h1>
-            <div className="flex flex-wrap justify-end gap-2">
-              <LanguageControls language={language} onChange={setLanguage} />
-              <AccessibilityControls
-                largeText={largeText}
-                highContrast={highContrast}
-                onLargeTextChange={setLargeText}
-                onHighContrastChange={setHighContrast}
-                language={language}
-              />
-            </div>
-          </div>
-          <p className="mt-3 text-sm leading-6 text-slate-600">
-            {t("signInDescription")}
-          </p>
-          {error && <p role="alert" className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
-          {apiUnavailable && <p className="mt-3 text-xs text-slate-500">{t("replayRequiresSignIn")}</p>}
-          <button
-            className="mt-6 w-full rounded-xl bg-accent px-5 py-3 font-semibold text-white"
-            onClick={() => void beginLogin().catch((caught: unknown) => {
-              setError(caught instanceof Error ? caught.message : "Could not start sign-in.");
-            })}
-          >
-            {t("signIn")}
-          </button>
-        </section>
-      </main>
+      <LoginScreen
+        language={language}
+        darkTheme={darkTheme}
+        largeText={largeText}
+        highContrast={highContrast}
+        showDemoAccounts={apiMode === "mock" || apiMode === "sandbox"}
+        loading={loginStarting}
+        error={error || (apiUnavailable ? t("replayRequiresSignIn") : "")}
+        onLanguageChange={setLanguage}
+        onThemeChange={() => setDarkTheme((value) => !value)}
+        onLargeTextChange={() => setLargeText((value) => !value)}
+        onHighContrastChange={() => setHighContrast((value) => !value)}
+        onBack={returnToWelcome}
+        onSignIn={() => void startLogin()}
+      />
     );
   }
 

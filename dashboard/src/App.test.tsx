@@ -84,7 +84,7 @@ describe("OIDC-authenticated approval dashboard", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "Masuk ke menara kendali" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "ChainMind" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Mulai" })).not.toBeInTheDocument();
   });
 
   it("keeps authenticated viewers read-only", async () => {
